@@ -1,0 +1,10 @@
+.env
+*.env
+credentials.json
+credentials.json.*
+*.log
+*.bak
+*.bak*
+*.backup
+*.broken
+battle_phase.json
