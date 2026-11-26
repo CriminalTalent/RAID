@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAID 관전</title>
+<link rel="stylesheet" href="/assets/raid.css">
+<script src="/assets/raid.js"></script>
+</head>
+<body>
+<div class="page">
+  <div class="tabs" id="tabs"></div>
+  <div id="root"></div>
+</div>
+<script>
+navBar('watch');
+let data = { battles: [] }, skew = 0, selected = decodeURIComponent(location.hash.slice(1));
+
+async function load() {
+  data = await api('/api/battles');
+  skew = data.now - Math.floor(Date.now() / 1000);
+  render();
+}
+
+function render() {
+  const list = data.battles || [];
+  if (!list.length) { $('tabs').innerHTML = ''; $('root').innerHTML = '<div class="card empty">진행 중인 레이드가 없습니다.</div>'; return; }
+  if (!list.find(b => b.id === selected)) selected = list[0].id;
+  $('tabs').innerHTML = list.length > 1 ? list.map(b =>
+    `<button class="${b.id === selected ? 'on' : ''}" data-id="${esc(b.id)}">${esc(b.creature?.name || '전투')}${b.active ? '' : ' · 종료'}</button>`).join('') : '';
+  $('tabs').querySelectorAll('button').forEach(x => x.onclick = () => { selected = x.dataset.id; history.replaceState(null, '', '#' + selected); render(); });
+
+  const b = list.find(x => x.id === selected);
+  $('root').innerHTML = `
+  <div class="layout three">
+    <div class="card">${statusHTML(b, skew)}${gridHTML(b)}<div class="units">${bossHTML(b)}</div></div>
+    <div class="card"><div class="card-h"><h2>전투 기록</h2><span class="sub">최신이 위</span></div><div class="log">${logHTML(b)}</div></div>
+    <div class="card"><div class="card-h"><h2>러너</h2><span class="sub">${(b.runners || []).length}명</span></div><div class="units" style="margin:0">${runnersHTML(b)}</div></div>
+  </div>`;
+}
+live(load);
+startTimers(() => data.battles, () => skew);
+</script>
+</body>
+</html>

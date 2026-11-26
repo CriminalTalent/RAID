@@ -13,7 +13,7 @@ class RaidServer
     '/' => 'index.html',
     '/admin' => 'admin.html',
     '/play' => 'play.html',
-    '/watch' => File.join(BATTLE_DIR, 'web', 'spectator.html')
+    '/watch' => 'watch.html'
   }.freeze
 
   def initialize(engine, host:, port:)
@@ -83,12 +83,15 @@ class RaidServer
     case [method, path]
     when ['GET', '/api/battles']
       return [200, 'application/json; charset=utf-8', WebState.public_battles]
+    when ['GET', '/api/wait']
+      return json('v' => @engine.wait_change(params['v'].to_i, 20))
     when ['GET', '/api/play']
       view = @engine.mutex.synchronize { @engine.player_view(params['t']) }
       return json({ 'error' => '링크가 올바르지 않거나 끝난 전투입니다.' }, 404) unless view
       return json(view)
     when ['POST', '/api/play']
       notice = @engine.mutex.synchronize { @engine.player_submit!(data['t'], data['command'].to_s) }
+      @engine.bump!
       return json('ok' => notice.nil?, 'notice' => notice)
     end
 
@@ -109,7 +112,6 @@ class RaidServer
       when ['GET', '/api/admin'] then nil
       when ['POST', '/api/admin/table'] then e.save_table!(d['key'].to_s, Array(d['rows']))
       when ['POST', '/api/admin/heal'] then e.heal_all!
-      when ['POST', '/api/admin/skills'] then (e.settings['skills'] = Array(d['skills']).map(&:to_s); e.store.save!)
       when ['POST', '/api/admin/start'] then e.start_battle!(runners: d['runners'], creature_name: d['creature'].to_s, auto_mode: d['auto'])
       when ['POST', '/api/admin/boss'] then e.boss_command!(d['id'], skill: d['skill'], targets: d['targets'], cells: d['cells'])
       when ['POST', '/api/admin/auto'] then e.set_auto!(d['id'], d['on'])
@@ -117,6 +119,7 @@ class RaidServer
       when ['POST', '/api/admin/end'] then e.end_battle!(d['id'])
       else return [404, 'text/plain; charset=utf-8', 'Not Found']
       end
+      e.bump! unless method == 'GET'
       json(e.admin_view)
     end
   end

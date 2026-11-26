@@ -24,6 +24,7 @@ require_relative 'local_sheet'
    battle_boss_patterns battle_round battle_session talk_lines web_state].each do |f|
   require File.join(BATTLE_DIR, f)
 end
+require_relative 'skill_catalog'
 
 ACTION_WAIT_SECONDS = (ENV['RAID_ACTION_SECONDS'] || '300').to_i
 ROUND_WAIT_SECONDS  = 0
@@ -31,8 +32,6 @@ CREATURE_COOLDOWN_KEY = '__creature__'.freeze
 LOCATION_MAP = {}.freeze
 BOT_USERNAME = '__raid__'.freeze
 
-# 기본 스킬(참여자 화면에 버튼으로 나오는 것). data/raid.json 의 settings.skills 로 바꿀 수 있다.
-DEFAULT_SKILLS = %w[공격 방어 회복 회피 순간이동 관찰].freeze
 
 # ── battle/main.rb 에서 라운드 진행 함수만 그대로 불러오기 ─────────────────
 MAIN_FUNCTIONS = %w[
@@ -107,7 +106,7 @@ class WebListener
 end
 
 class RaidEngine
-  attr_reader :store, :runner_sheet, :creature_sheet, :sessions, :mutex
+  attr_reader :store, :runner_sheet, :creature_sheet, :sessions, :mutex, :version
 
   def initialize(data_path)
     @store = LocalStore.new(data_path, File.join(APP_DIR, 'data', 'sample.json'))
@@ -118,9 +117,31 @@ class RaidEngine
     @tokens = {}
     @mutex = Monitor.new
     @last_post_time = Time.at(0)
+    @version = 1
+    @last_snapshot = nil
     settings['admin_key'] ||= SecureRandom.alphanumeric(8)
-    settings['skills'] ||= DEFAULT_SKILLS.dup
+    unless @store.book('app')['스킬']
+      rows = SkillCatalog.default_rows
+      if settings['skills'].is_a?(Array)
+        rows[1..].each { |r| r[12] = settings['skills'].include?(r[0]) ? 'O' : '' }
+      end
+      @store.book('app')['스킬'] = rows
+    end
+    settings.delete('skills')
+    SkillCatalog.install!(@store.book('app')['스킬'])
     @store.save!
+  end
+
+  # 화면들이 "바뀐 게 있나?" 를 묻는 번호. 무언가 바뀔 때마다 1씩 오른다.
+  def bump!
+    @version += 1
+  end
+
+  # 바뀔 때까지(최대 timeout초) 기다렸다가 현재 번호를 돌려준다. 다른 창의 변화가 바로 반영되는 원리.
+  def wait_change(since, timeout = 20)
+    deadline = Time.now + timeout
+    sleep 0.2 while @version <= since.to_i && Time.now < deadline
+    @version
   end
 
   def settings
@@ -132,25 +153,45 @@ class RaidEngine
   end
 
   def skills
-    Array(settings['skills']).select { |s| s == '순간이동' || s == '관찰' || BattleSkills.get(s) }
+    SkillCatalog.visible(@store.book('app')['스킬'])
   end
 
   # ── 데이터(스탯 표) ──────────────────────────────────────────
   TABLES = {
     'runners'     => ['runner', '스탯'],
     'creatures'   => ['creature', '스탯'],
-    'boss_skills' => ['creature', '보스스킬']
+    'boss_skills' => ['creature', '보스스킬'],
+    'runner_skills' => ['app', '스킬']
   }.freeze
+
+  def check_unique!(rows, col, label)
+    seen = {}
+    Array(rows)[1..].to_a.each do |r|
+      v = r[col].to_s.strip
+      raise "#{label}이(가) 비어 있는 줄이 있습니다." if v.empty?
+      raise "#{label} '#{v}'이(가) 두 번 있습니다." if seen[v]
+      seen[v] = true
+    end
+  end
 
   def tables
     TABLES.transform_values { |(book, tab)| @store.book(book)[tab] || [] }
   end
 
   def save_table!(key, rows)
-    book, tab = TABLES.fetch(key)
+    book, tab = TABLES.fetch(key) { raise '알 수 없는 표입니다.' }
+    rows = Array(rows).map { |r| Array(r).map { |v| v.to_s.strip } }
+    case key
+    when 'runners' then check_unique!(rows, 0, 'ID')
+    when 'creatures' then check_unique!(rows, 1, '이름')
+    when 'boss_skills' then check_unique!(rows, 0, '스킬명')
+    when 'runner_skills' then SkillCatalog.validate!(rows)
+    end
     @store.replace_tab!(book, tab, rows)
+    SkillCatalog.install!(@store.book('app')['스킬']) if key == 'runner_skills'
     @runner_sheet.invalidate_base_stats_cache!
     $boss_skill_cache = nil
+    bump!
   end
 
   def heal_all!
@@ -158,6 +199,7 @@ class RaidEngine
     rows[1..].to_a.each { |r| r[4] = r[10].to_s if r[10].to_s.match?(/\A\d+\z/) }
     @store.save!
     @runner_sheet.invalidate_base_stats_cache!
+    bump!
   end
 
   def runner_ids
@@ -304,18 +346,36 @@ class RaidEngine
       'submitted' => s.actions[name] ? { 'type' => s.actions[name][:type], 'target' => s.actions[name][:target] } : nil,
       'prep_done' => s.phase == :prep && ctx[:positions].to_h[name].to_s != '',
       'notice' => @listener.notice_for(name),
-      'skills' => skills.map do |sk|
+      'skills' => skills.map do |item|
+        sk = item[:name]
         d = BattleSkills.get(sk) || {}
+        kind = item[:kind]
         {
           'name' => sk,
-          'category' => sk == '순간이동' ? '이동' : (sk == '관찰' ? '대기' : d[:category]),
-          'range' => sk == '순간이동' ? '제한 없음' : d[:range].to_s,
+          'kind' => kind,
+          'category' => kind == 'teleport' ? '이동' : (kind == 'pass' ? '대기' : d[:category]),
+          'range' => kind == 'teleport' ? '제한 없음' : d[:range].to_s,
           'cooldown' => d[:once] ? '1회' : d[:cooldown].to_i,
+          'max_targets' => [d[:max_targets].to_i, 1].max,
+          'desc' => SkillCatalog::KINDS[kind].to_s,
+          'target' => target_kind(kind, d),
           'left' => ctx[:cooldowns][name][sk].to_i,
           'used_once' => d[:once] && ctx[:once_used][name][sk] ? true : false
         }
       end
     }
+  end
+
+  # 참여자 화면에서 무엇을 고르게 할지: none / creature / creature_cell / runner / runner_cell / runner_skill / cell
+  def target_kind(kind, d)
+    return 'cell' if kind == 'teleport'
+    return 'none' if kind == 'pass'
+    return 'creature_cell' if kind == 'rush'
+    return 'creature' if d[:category] == '공격'
+    return 'none' if d[:range].to_s == '자신' || SkillCatalog::AREA_KINDS.include?(kind)
+    return 'runner_cell' if kind == 'force_move'
+    return 'runner_skill' if kind == 'cooldown_reset'
+    'runner'
   end
 
   # ── 진행 루프 (1초마다) ─────────────────────────────────────
@@ -344,6 +404,12 @@ class RaidEngine
         end
       end
       WebState.sync_sessions(@sessions)
+      snap = WebState.public_battles
+      key = snap.gsub(/"(now|updated_at)":\d+,?/, '')
+      if key != @last_snapshot
+        @last_snapshot = key
+        bump!
+      end
       @sessions.delete_if { |_id, s| s.finished? && (Time.now - s.start_time) > 3600 }
       @tokens.delete_if { |_t, (sid, _)| !@sessions.key?(sid) }
     end
@@ -356,8 +422,8 @@ class RaidEngine
         'runner_ids' => runner_ids,
         'creature_names' => creature_names,
         'boss_skills' => boss_skill_names,
-        'skills' => skills,
-        'all_skills' => BattleSkills.names.reject { |n| %w[지정공격1인 지정공격다인 범위공격 전체공격].include?(n) } + %w[순간이동 관찰],
+        'kinds' => SkillCatalog::KINDS,
+        'version' => @version,
         'battles' => @sessions.values.map do |s|
           {
             'id' => s.id,
