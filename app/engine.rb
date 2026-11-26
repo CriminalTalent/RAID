@@ -77,6 +77,44 @@ end
 end
 load_main_functions!
 
+# ── 보스 스킬 범위 확장: 보스스킬 표의 "범위"에 '주변N' / '전방N' 을 쓰면
+#    그 라운드 보스 위치·방향 기준으로 칸 목록을 계산해 기존 "칸 목록 공격" 규칙에 넘긴다.
+alias __rule_apply_boss_skill_definition! apply_boss_skill_definition!
+def apply_boss_skill_definition!(creature, creature_sheet)
+  __rule_apply_boss_skill_definition!(creature, creature_sheet)
+  m = creature[:skill_range_default].to_s.strip.match(/\A(주변|전방)\s*(\d+)\z/)
+  if m && creature[:skill_range].to_s.strip.empty?
+    cells = boss_area_cells(creature, m[1], m[2].to_i)
+    creature[:skill_range] = creature[:pattern_cells] = cells.join(',') if cells.any?
+  end
+  creature
+end
+
+def boss_area_cells(creature, kind, n)
+  body = BattleGrid.creature_cells(creature)
+  pts = body.map { |c| BattleGrid.parse_pos(c) }.compact
+  return [] if pts.empty? || n <= 0
+  out = []
+  if kind == '주변'
+    xs = pts.map(&:first); ys = pts.map(&:last)
+    ((xs.min - n)..(xs.max + n)).each do |x|
+      ((ys.min - n)..(ys.max + n)).each do |y|
+        c = BattleGrid.format_pos(x, y)
+        out << c if c && !body.include?(c)
+      end
+    end
+  else
+    dx, dy = { '상' => [0, -1], '하' => [0, 1], '좌' => [-1, 0], '우' => [1, 0] }.fetch(creature[:facing].to_s.strip, [0, 1])
+    pts.each do |x, y|
+      (1..n).each do |k|
+        c = BattleGrid.format_pos(x + dx * k, y + dy * k)
+        out << c if c && !body.include?(c)
+      end
+    end
+  end
+  out.uniq
+end
+
 # ── 마스토돈 게시 대신: 웹 전투 기록에 남긴다 ──────────────────────────────
 # 마스토돈용 안내 문구(입력 형식, 텍스트 격자맵)는 웹 화면에 이미 있으므로 기록에서 뺀다.
 def web_log_text(text)
@@ -99,6 +137,13 @@ def web_log_text(text)
     phrases.each { |ph| text = text.gsub(/\[#{house}\]( ?[^\n]*#{Regexp.escape(ph)})/) { "[#{label}]#{$1}" } }
   end
   text = text.gsub(/\[(그리핀도르|슬리데린|래번클로|후플푸프)\]/, '[팀 패시브]').gsub('[기숙사 패시브]', '[팀 패시브]')
+  if $raid_engine
+    $raid_engine.table_rows('runner', '스탯').each do |r|
+      id = r[0].to_s.strip
+      next if id.empty? || r[1].to_s.strip.empty?
+      text = text.gsub(/(?<![A-Za-z0-9_])#{Regexp.escape(id)}(?![A-Za-z0-9_])/, r[1].to_s.strip)
+    end
+  end
   text.gsub('순간이동', '이동').gsub(/\n{3,}/, "\n\n").strip
 end
 
@@ -594,7 +639,7 @@ class RaidEngine
     tick!
   end
 
-  # 승리: 보스에 정한 보상만큼 참여자 전원 크레딧 +, 패배(전원 전투불능): 정한 만큼 압수 (0 아래로는 안 내려감)
+  # 승리: 보스에 정한 보상만큼 참여자 전원 크레딧 +, 패배(전원 전투불능): 정한 만큼 압수 (모자라면 마이너스)
   def settle_credits!(s, text)
     crow = table_rows('creature', '스탯').find { |r| r[1].to_s.strip == s.creature[:name].to_s.strip }.to_a
     if text.start_with?('[승리]')
@@ -609,7 +654,7 @@ class RaidEngine
       lines = s.runner_names.map do |id|
         row = runner_row(id) or next
         before = row[17].to_i
-        row[17] = [before - amount, 0].max.to_s
+        row[17] = (before - amount).to_s
         "#{display_of(id)} #{before} → #{row[17]}"
       end.compact
       @store.save!

@@ -61,9 +61,9 @@ const SCHEMA = {
   },
   boss_skills: {
     title: '보스 스킬', keyCol: 0, sub: r => `${r[1] || '공격'} · ${r[2] || (r[9] ? '대상 ' + r[9] + '명' : '무작위 1명')}`,
-    help: '범위에 "전체"를 넣으면 전원 공격, 칸 목록(C6,D6)을 넣으면 그 칸 공격, 비우면 대상 수만큼 무작위. 위력은 피해 공식이 비면 마법능력×배율.',
+    help: '+ 추가로 보스 스킬을 얼마든지 만들 수 있어요. 만든 스킬은 크리쳐 메뉴의 "이 보스가 쓰는 스킬"에서 넣어 주세요. 범위: 비우면 대상 수만큼 무작위 · 전체 = 전원 · 주변N = 보스 몸 주변 N칸 · 전방N = 머리 방향으로 N칸 · 칸 목록(C6,D6) = 그 칸. 위력은 피해 공식이 비면 마법능력×배율.',
     fields: [
-      [0, '스킬명'], [1, '분류', ['공격', '디버프']], [2, '범위 (전체 / 칸 목록 / 빈칸)'], [9, '대상 수', 'num'],
+      [0, '스킬명'], [1, '분류', ['공격', '디버프']], [2, '범위', 'range'], [9, '대상 수', 'num'],
       [4, '배율'], [6, '피해 공식 (예: 고정 20, 마법×1.5)'], [5, '디버프', ['', '독', '둔화', '약화', '취약', '기절', '반격']], [3, '쿨타임', 'num'],
       [10, '설명', 'wide'], [11, '전조 대사 (선택 · 라운드 시작 때 보이는 예고)', 'wide']
     ],
@@ -340,6 +340,8 @@ function fieldHTML(k, r, [col, label, type]) {
         ${v ? `<button type="button" class="sm ghost" data-imgclear="${col}">지우기</button>` : ''}</div>
         <input id="${id}" data-col="${col}" value="${esc(v)}" placeholder="또는 이미지 주소 붙여넣기"></div></div>`;
     return `<div class="f wide"><label>${esc(label)}</label>${input}</div>`;
+  } else if (type === 'range') {
+    input = `<input id="${id}" data-col="${col}" value="${esc(v)}" list="rangelist" placeholder="빈칸 = 무작위 대상"><datalist id="rangelist">${['전체', '주변1', '주변2', '전방2', '전방3', '전방4'].map(o => `<option value="${o}">`).join('')}</datalist>`;
   } else if (type === 'team') {
     const opts = [['', '(팀 없음)'], ...teamRows().map(t => [t[0], t[1]])];
     input = `<select id="${id}" data-col="${col}">${opts.map(([val, lab]) => `<option value="${esc(val)}" ${val === v ? 'selected' : ''}>${esc(lab)}</option>`).join('')}</select>`;
