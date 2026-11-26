@@ -339,3 +339,7 @@ input, select, textarea { border-radius: 2px; }
 .result .r-log article { padding: 6px 0; border-bottom: 1px solid var(--line); }
 .result .r-log time { display: block; font-size: 11px; color: var(--muted, #9ab); }
 .ovl.k-target .ovl-main { color: var(--warn); }
+
+.pop .pop-t { font-weight: 700; margin-bottom: 6px; }
+.pop .pop-list { display: flex; flex-direction: column; gap: 4px; min-width: 160px; max-height: 50vh; overflow: auto; }
+.pop .pop-list button { justify-content: flex-start; text-align: left; }
