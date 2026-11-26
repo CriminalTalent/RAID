@@ -275,20 +275,46 @@ function showNextOverlay() {
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => { el.remove(); ovl.busy = false; showNextOverlay(); }, 300); }, ms);
 }
 
-/* 칸을 누른 자리 옆에 뜨는 작은 확인창. yes 를 누르면 onYes() */
-function confirmPop(ev, text, onYes) {
+/* 마우스 옆에 뜨는 작은 창. html 을 넣고, 바깥을 누르면 닫힌다. 닫는 함수(close)를 돌려준다 */
+function popAt(ev, html, { keepOnGrid = false } = {}) {
   document.querySelector('.pop')?.remove();
-  const d = document.createElement('div'); d.className = 'pop';
-  d.innerHTML = `<div>${esc(text)}</div><div class="btns"><button class="primary sm" data-y>Yes</button><button class="sm" data-n>No</button></div>`;
+  const d = document.createElement('div'); d.className = 'pop'; d.innerHTML = html;
   document.body.appendChild(d);
-  const w = d.offsetWidth, h = d.offsetHeight;
-  d.style.left = Math.min(ev.clientX + 12, innerWidth - w - 8) + 'px';
-  d.style.top = Math.min(ev.clientY + 12, innerHeight - h - 8) + 'px';
+  const w = d.offsetWidth, h = d.offsetHeight, x = ev.clientX, y = ev.clientY;
+  d.style.left = Math.max(8, Math.min(x + 12, innerWidth - w - 8)) + 'px';
+  d.style.top = Math.max(8, Math.min(y + 12, innerHeight - h - 8)) + 'px';
   const close = () => { d.remove(); removeEventListener('mousedown', out, true); };
-  const out = e => { if (!d.contains(e.target)) close(); };
+  const out = e => { if (!d.contains(e.target) && !(keepOnGrid && e.target.closest?.('.cell.pick'))) close(); };
   setTimeout(() => addEventListener('mousedown', out, true));
-  d.querySelector('[data-y]').onclick = () => { close(); onYes(); };
-  d.querySelector('[data-n]').onclick = close;
+  d._close = close;
+  return d;
+}
+/* Yes/No 확인창 */
+function confirmPop(ev, text, onYes) {
+  const d = popAt(ev, `<div>${esc(text)}</div><div class="btns"><button class="primary sm" data-y>Yes</button><button class="sm" data-n>No</button></div>`);
+  d.querySelector('[data-y]').onclick = () => { d._close(); onYes(); };
+  d.querySelector('[data-n]').onclick = d._close;
+}
+/* 고르기 창: items = [{ value, label, note, disabled }]. max>1 이면 여러 개 고르고 [다음] */
+function choicePop(ev, title, items, onPick, { max = 1 } = {}) {
+  const chosen = new Set();
+  const d = popAt(ev, `<div class="pop-t">${esc(title)}</div><div class="pop-list">${items.map((it, i) =>
+    `<button class="sm" data-i="${i}" ${it.disabled ? 'disabled' : ''}>${esc(it.label)}${it.note ? ` <span class="tag">${esc(it.note)}</span>` : ''}</button>`).join('')}</div>
+    <div class="btns">${max > 1 ? `<button class="primary sm" data-next disabled>다음</button>` : ''}<button class="sm" data-n>취소</button></div>`);
+  const next = d.querySelector('[data-next]');
+  d.querySelectorAll('[data-i]').forEach(b => b.onclick = e => {
+    const v = items[+b.dataset.i].value;
+    if (max <= 1) { d._close(); return onPick([v], e); }
+    if (chosen.has(v)) chosen.delete(v); else if (chosen.size < max) chosen.add(v);
+    b.classList.toggle('on', chosen.has(v)); next.disabled = !chosen.size;
+  });
+  if (next) next.onclick = e => { d._close(); onPick([...chosen], e); };
+  d.querySelector('[data-n]').onclick = d._close;
+}
+/* 안내만 띄우는 창 (격자에서 칸 고르기 등) */
+function hintPop(ev, text) {
+  const d = popAt(ev, `<div>${esc(text)}</div>`, { keepOnGrid: true });
+  return d;
 }
 
 /* 전투 결과 창: 승리자 + [확인] + [전투 기록 보기] */
