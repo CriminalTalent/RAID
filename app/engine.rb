@@ -918,7 +918,7 @@ class RaidEngine
     fails = @login_fails[ip].select! { |t| t > now - 600 } || @login_fails[ip]
     all = @login_fails.values.flatten.count { |t| t > now - 600 }
     raise '비밀번호를 여러 번 틀려서 10분 동안 잠겼습니다.' if fails.size >= 5 || all >= 30
-    unless secure_eq(password.to_s, admin_key.to_s)
+    unless secure_eq(password.to_s.strip, admin_key.to_s.strip)
       fails << now
       raise "관리자 비밀번호가 틀렸습니다. (#{5 - fails.size}번 남음)"
     end
