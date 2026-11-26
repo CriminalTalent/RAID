@@ -423,6 +423,13 @@ class RaidEngine
       if sess && lobby?(sess.id)
         b['phase'] = 'lobby'
         b['ready'] = @lobby[sess.id].to_a
+        # 대기실: 전투 시작 전이라 상태가 비어 있으니, 지금 저장된 러너 정보로 보여 준다 (관리자가 고치면 바로 반영)
+        base = @runner_sheet.read_base_stats
+        b['runners'] = sess.runner_names.map do |n|
+          st = base.find { |x| x[:name].to_s == n } || {}
+          { 'name' => n, 'display' => st[:display_name].to_s.empty? ? n : st[:display_name].to_s,
+            'hp' => st[:hp].to_i, 'max_hp' => [st[:max_hp].to_i, st[:hp].to_i, 1].max, 'pos' => nil }
+        end
       end
       b['runners'].each do |r|
         # 준비 라운드: 시작 칸을 고르기 전에는 격자에 안 보이게
@@ -818,6 +825,11 @@ class RaidEngine
       'display' => stat[:display_name].to_s.empty? ? name : stat[:display_name],
       'phase' => lobby?(s.id) ? 'lobby' : s.phase.to_s,
       'ready' => lobby?(s.id) && @lobby[s.id].include?(name),
+      'card' => {
+        'img' => runner_row(name).to_a[14].to_s, 'role' => runner_row(name).to_a[13].to_s,
+        'hp' => stat[:hp].to_i, 'max_hp' => [stat[:max_hp].to_i, stat[:hp].to_i, 1].max,
+        'stats' => [['내구도', stat[:dur]], ['마법능력', stat[:atk]], ['민첩', stat[:agi]], ['기술', stat[:tec]], ['행운', stat[:luck]]].map { |l, v| [l, v.to_i] }
+      },
       'active' => s.active,
       'round' => s.round,
       'my_pos' => ctx[:positions].to_h[name],
