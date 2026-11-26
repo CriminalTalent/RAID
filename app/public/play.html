@@ -108,13 +108,29 @@ const HINT = {
   runner_skill: '대상과 초기화할 스킬을 고르세요.'
 };
 
+let cardOk = false;
+// 대기실에서 보여 주는 내 캐릭터 카드
+function cardHTML() {
+  const c = me.card || {}, t = me.team || {};
+  const sk = (me.skills || []).map(x => `<span class="tag">${esc(x.name)}</span>`).join(' ');
+  const eq = (me.equipment || []).map(e => `${esc(e.name)}${e.bonus ? ' (' + esc(e.bonus) + ')' : ''}`).join(' · ') || '없음';
+  const it = (me.items || []).map(i => `${esc(i.name)} ×${i.count}`).join(' · ') || '없음';
+  return `<div class="charcard">${avatarHTML(me.display, c.role, c.img, 'lg')}
+    <div class="cc-body"><div class="cc-name">${esc(me.display)} ${c.role ? `<span class="role ${esc(c.role)}">${esc(c.role)}</span>` : ''}</div>
+      <div class="cc-hp"><span>건강</span><b>${c.hp ?? '-'} / ${c.max_hp ?? '-'}</b></div><div class="bar"><i style="width:${pct(c.hp || 0, c.max_hp || 1)}%"></i></div>
+      <div class="cc-stats">${(c.stats || []).map(([l, v]) => `<div><span>${esc(l)}</span><b>${v}</b></div>`).join('')}</div>
+      <div class="kv" style="margin-top:8px"><span>팀</span><span>${esc(t.team || '없음')}${t.passive ? ` · 패시브 <b>${esc(t.passive)}</b> (${esc(t.desc || '')})` : ''}</span>
+        <span>스킬</span><span>${sk || '없음'}</span><span>장비</span><span>${eq}</span><span>소지품</span><span>${it}</span></div></div></div>`;
+}
 function actionHTML() {
   if (!me.active) return '<div class="msg info">전투가 끝났습니다.</div>';
   const mine = (battle.runners || []).find(r => r.name === me.me);
   if (mine && mine.hp <= 0) return '<div class="msg err">전투불능 상태예요. 이번 전투는 관전만 할 수 있어요.</div>';
-  if (me.phase === 'lobby') return me.ready
+  if (me.phase === 'lobby') return cardHTML() + (me.ready
     ? `<div class="msg ok">준비 완료! 관리자가 전투를 시작하면 시작 위치를 고를 수 있어요.</div><div class="btns" style="margin-top:8px"><button class="sm ghost" id="unready">준비 취소</button></div>`
-    : `<div class="msg info">전투에 들어갈 준비가 됐으면 아래 버튼을 누르세요.</div><div class="btns" style="margin-top:8px"><button class="primary" id="ready">준비 완료</button></div>`;
+    : `<div class="msg info">내 캐릭터 정보가 맞는지 확인하세요. 틀린 곳이 있으면 채팅으로 진행자에게 알려 주세요. 진행자가 고치면 이 화면에 바로 반영돼요.</div>
+       <label class="chk"><input type="checkbox" id="cardok" ${cardOk ? 'checked' : ''}> 내 캐릭터 정보를 확인했어요</label>
+       <div class="btns" style="margin-top:8px"><button class="primary" id="ready" ${cardOk ? '' : 'disabled'}>준비 완료</button></div>`);
   if (me.phase === 'prep') return me.prep_done
     ? `<div class="msg ok">시작 위치 ${esc(me.my_pos)} 등록 완료. 다른 칸을 누르면 바꿀 수 있어요.</div>`
     : '<div class="msg info">격자에서 시작할 빈 칸을 누르세요.</div>';
@@ -183,11 +199,14 @@ function draw() {
   if (me.active && me.phase === 'battle' && !me.submitted && s && s.target === 'cell') pickable = p => !occupied.has(p) && chebyshev(myPos(), p) === 1;
 
   const moveSet = s && s.target === 'cell' ? new Set(COLS.flatMap(x => ROWS.map(y => x + y)).filter(p => chebyshev(myPos(), p) === 1 && !occupied.has(p))) : null;
+  const actCard = `<div class="card"><div class="card-h"><h2>내 행동</h2></div>
+        ${flash ? `<div class="msg ${flash.cls}">${esc(flash.text)}</div>` : ''}${actionHTML()}</div>`;
   $('root').innerHTML = `
   <div class="stage">
     <div class="leftcol"><div class="card"><div class="panel-h">러너 팀</div>${teamHTML(battle, me.me)}</div>
       <div class="card chatcard"><div class="card-h"><h2>채팅</h2><span class="sub">참여자·진행자</span></div>${chatHTML(battle, { mine: 'p:' + me.me, canSend: true })}</div></div>
     <div>
+      ${battle.phase === 'lobby' ? actCard : ''}
       <div class="card center">
         <div class="status" style="text-align:left"><span><b>${battle.phase === 'lobby' ? '대기' : battle.phase === 'prep' ? '준비' : battle.round + '라운드'}</b> <span class="sub">${esc(battle.active ? (PHASE[battle.phase] || '') : '전투 종료')}</span></span>
           <span class="timer">${myPos() ? '내 위치 ' + esc(myPos()) : ''}</span></div>
@@ -196,8 +215,7 @@ function draw() {
         ${ringHTML(battle, skew)}
         <div class="sub">${esc(me.display)} 님${battle.phase === 'battle' ? ' · 행동 입력 마감까지' : ''}</div>
       </div>
-      <div class="card"><div class="card-h"><h2>내 행동</h2></div>
-        ${flash ? `<div class="msg ${flash.cls}">${esc(flash.text)}</div>` : ''}${actionHTML()}</div>
+      ${battle.phase !== 'lobby' ? actCard : ''}
     </div>
     <div>
       <div class="card"><div class="panel-h boss">보스</div>${bossCardHTML(battle)}</div>
@@ -219,6 +237,7 @@ function draw() {
   });
   document.querySelectorAll('[data-sub]').forEach(b => b.onclick = ev => { pick.sub = b.dataset.sub; render(); askSubmit(ev); });
   if ($('go')) $('go').onclick = () => submit(command());
+  if ($('cardok')) $('cardok').onchange = () => { cardOk = $('cardok').checked; render(); };
   if ($('ready')) $('ready').onclick = () => api('/api/ready', { t: token, on: true }).then(load).catch(e => { flash = { cls: 'err', text: e.message }; render(); });
   if ($('unready')) $('unready').onclick = () => api('/api/ready', { t: token, on: false }).then(load).catch(e => { flash = { cls: 'err', text: e.message }; render(); });
   if ($('cancel')) $('cancel').onclick = () => { reset(); render(); };
