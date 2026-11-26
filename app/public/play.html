@@ -10,7 +10,7 @@
 <body>
 <div class="page"><div id="root"><div class="card empty">불러오는 중…</div></div></div>
 <script>
-const token = new URLSearchParams(location.search).get('t') || '';
+const token = location.pathname.startsWith('/p/') ? decodeURIComponent(location.pathname.slice(3)) : (new URLSearchParams(location.search).get('t') || '');
 navBar('play', `<a class="item on" href="${location.pathname + location.search}">참여</a>`);
 let me = null, battle = null, skew = 0, sending = false, flash = null;
 let pick = { skill: null, runners: [], cell: null, sub: null };
@@ -90,7 +90,7 @@ function actionHTML() {
   });
   h += '</div>';
   if ((me.items || []).length) {
-    h += '<div class="sec">아이템</div><div class="actions">' + me.items.map(it =>
+    h += '<div class="sec">아이템</div><div class="actions items">' + me.items.map(it =>
       `<button data-skill="${esc(it.name)}" class="item ${pick.skill === it.name ? 'on' : ''}" title="${esc(it.desc)}">${esc(it.name)} <span class="tag">×${it.count}</span></button>`).join('') + '</div>';
   }
   if ((me.equipment || []).length) h += `<div class="sub" style="margin-top:8px">장비: ${me.equipment.map(e => `${esc(e.name)}${e.bonus ? ' (' + esc(e.bonus) + ')' : ''}`).join(' · ')}</div>`;
@@ -120,7 +120,8 @@ function actionHTML() {
   return h;
 }
 
-function render() {
+function render() { keepInputs(draw); initRings(() => battle ? [battle] : [], () => skew); }
+function draw() {
   if (!battle) { $('root').innerHTML = '<div class="card empty">전투 정보를 기다리는 중…</div>'; return; }
   document.title = `RAID · ${me.display}`;
   const s = skillOf(pick.skill);
@@ -139,7 +140,7 @@ function render() {
         <div class="status" style="text-align:left"><span><b>${battle.phase === 'prep' ? '준비' : battle.round + '라운드'}</b> <span class="sub">${esc(battle.active ? (PHASE[battle.phase] || '') : '전투 종료')}</span></span>
           <span class="timer">${myPos() ? '내 위치 ' + esc(myPos()) : ''}</span></div>
         <div id="grid">${gridHTML(battle, { me: me.me, pickable, inrange: moveSet || (s ? rangeSet(s) : null), picks: new Set(pick.cell ? [pick.cell] : []) })}</div>
-        <div class="bigtimer" data-bigtimer="${esc(battle.id)}">${bigTimer(battle, skew)}</div>
+        ${ringHTML(battle, skew)}
         <div class="sub">${esc(me.display)} 님${battle.phase === 'battle' ? ' · 행동 입력 마감까지' : ''}</div>
       </div>
       <div class="card"><div class="card-h"><h2>내 행동</h2></div>
@@ -147,7 +148,8 @@ function render() {
     </div>
     <div>
       <div class="card"><div class="panel-h boss">보스</div>${bossCardHTML(battle)}</div>
-      <div class="card"><div class="card-h"><h2>응원</h2></div>${cheerFeedHTML(battle, 5)}</div>
+      <div class="card"><div class="card-h"><h2>채팅</h2><span class="sub">참여자·진행자</span></div>${chatHTML(battle, { mine: 'p:' + me.me, canSend: true })}</div>
+      <div class="card"><div class="card-h"><h2>응원</h2></div>${cheerFeedHTML(battle, 4)}</div>
       <div class="card"><div class="card-h"><h2>전투 기록</h2></div><div class="log" style="max-height:380px">${logHTML(battle, 8)}</div></div>
     </div>
   </div>`;
@@ -166,6 +168,7 @@ function render() {
   document.querySelectorAll('[data-sub]').forEach(b => b.onclick = () => { pick.sub = b.dataset.sub; render(); });
   if ($('go')) $('go').onclick = () => submit(command());
   if ($('cancel')) $('cancel').onclick = () => { reset(); render(); };
+  bindChat((id, text) => api('/api/chat', { t: token, text }));
 }
 
 live(load);

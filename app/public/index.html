@@ -26,7 +26,7 @@ async function load() {
       ${bossHTML(b)}
       <div class="units">${runnersHTML(b)}</div>
       <div class="btns" style="margin-top:12px">
-        <a class="btn" href="/watch#${encodeURIComponent(b.id)}" target="raid-watch">관전</a>
+        <a class="btn" href="/w/${encodeURIComponent(b.id)}" target="raid-watch">관전</a>
         ${isAdmin() ? `<a class="btn" href="/admin#${encodeURIComponent(b.id)}" target="raid-admin">관리</a>` : ''}
       </div>
     </div>`).join('') : '<div class="card empty" style="grid-column:1/-1">아직 진행 중인 레이드가 없습니다. 전투가 시작되면 여기에 나타나요.</div>';

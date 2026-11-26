@@ -14,7 +14,8 @@
 </div>
 <script>
 navBar('watch');
-let data = { battles: [] }, skew = 0, selected = decodeURIComponent(location.hash.slice(1));
+const fixedId = location.pathname.startsWith('/w/') ? decodeURIComponent(location.pathname.slice(3)) : '';
+let data = { battles: [] }, skew = 0, selected = fixedId || decodeURIComponent(location.hash.slice(1));
 let myName = localStorage.getItem('raidWatcherName') || '', cheerMsg = null;
 
 /* 관전자는 이름을 넣고 들어온다. 채팅은 없고 응원 버튼만 있다. */
@@ -50,8 +51,10 @@ async function load() {
   render();
 }
 
-function render() {
-  const list = data.battles || [];
+function render() { keepInputs(draw); initRings(() => data.battles || [], () => skew); }
+function draw() {
+  const list = (data.battles || []).filter(b => !fixedId || b.id === fixedId);
+  if (fixedId && !list.length) { $('tabs').innerHTML = ''; $('root').innerHTML = '<div class="card empty">이 전투는 끝났거나 없는 주소예요. <a href="/watch">진행 중인 전투 보기</a></div>'; return; }
   if (!list.length) { $('tabs').innerHTML = ''; $('root').innerHTML = '<div class="card empty">진행 중인 레이드가 없습니다.</div>'; return; }
   if (!list.find(b => b.id === selected)) selected = list[0].id;
   $('tabs').innerHTML = list.length > 1 ? list.map(b =>
@@ -66,7 +69,7 @@ function render() {
       <div class="status" style="text-align:left"><span><b>${b.phase === 'prep' ? '준비' : b.round + '라운드'}</b> <span class="sub">${esc(b.active ? (PHASE[b.phase] || '') : '전투 종료')}</span></span>
         <span class="timer">${b.phase === 'battle' ? `제출 ${(b.submitted || []).length}/${b.required}` : ''}</span></div>
       ${gridHTML(b)}
-      <div class="bigtimer" data-bigtimer="${esc(b.id)}">${bigTimer(b, skew)}</div>
+      ${ringHTML(b, skew)}
       <div class="sub">${b.active ? (b.phase === 'battle' ? '행동 입력 마감까지' : b.phase === 'prep' ? '시작 위치 입력 마감까지' : esc(PHASE[b.phase] || '')) : '전투가 끝났습니다'}</div>
     </div>
     <div>
@@ -74,11 +77,13 @@ function render() {
       <div class="card"><div class="card-h"><h2>응원하기</h2><span class="sub">${esc(myName)} 님 · <a href="#" id="rename">이름 바꾸기</a></span></div>
         ${cheerMsg ? `<div class="msg err">${esc(cheerMsg)}</div>` : ''}
         ${b.active ? `<div class="cheerbtns">${Object.entries(CHEERS).map(([k, t]) => `<button data-cheer="${k}">${t}<span class="n">${b.cheers?.counts?.[k] || ''}</span></button>`).join('')}</div>` : '<div class="sub">끝난 전투에는 응원할 수 없어요.</div>'}
-        ${cheerFeedHTML(b, 6)}</div>
+        ${cheerFeedHTML(b, 4)}</div>
+      <div class="card"><div class="card-h"><h2>채팅</h2><span class="sub">보기 전용</span></div>${chatHTML(b)}</div>
       <div class="card"><div class="card-h"><h2>전투 기록</h2><span class="sub">최신이 위</span></div><div class="log" style="max-height:460px">${logHTML(b)}</div></div>
     </div>
   </div>`;
   document.querySelectorAll('[data-cheer]').forEach(x => x.onclick = () => cheer(x.dataset.cheer));
+  bindChat(() => {});
   $('rename').onclick = e => { e.preventDefault(); gate(); };
 }
 myName ? api('/api/watch/hello', { name: myName }).then(start).catch(e => gate(e.message)) : gate();

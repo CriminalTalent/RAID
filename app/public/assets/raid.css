@@ -1,13 +1,15 @@
 :root {
-  --bg: #0f1116; --panel: #171a22; --panel2: #1f232d; --line: #2a2f3b; --text: #e4e6ec; --muted: #8b91a1;
-  --accent: #5b8cff; --me: #a87cff; --boss: #e0565b; --ok: #3fb950; --warn: #f0a020; --danger: #f85149;
-  --r: 10px; --gap: 12px; --shadow: none; --navbg: rgba(15,17,22,.92);
-  --tank: #4c8dff; --heal: #3fb950; --dps: #e0565b; --none: #8b91a1;
+  /* 다크: 짙은 청록빛 숯색 바탕 + 청록 포인트 + 살구빛 체력 */
+  --bg: #121716; --panel: #1a2120; --panel2: #222b2a; --line: #314039; --text: #e3ebe8; --muted: #8a9a95;
+  --accent: #7fcfb5; --accent-ink: #10201b; --me: #e8b07c; --boss: #d9867c; --ok: #7fcfb5; --warn: #e6b35c; --danger: #e8766c;
+  --hpbar: #d99a8f; --r: 6px; --gap: 12px; --shadow: none; --navbg: rgba(18,23,22,.92);
+  --tank: #6f9fd8; --heal: #6fbf9c; --dps: #d9867c; --none: #6d7c78;
+  --serif: "Noto Serif KR", "Nanum Myeongjo", "Batang", "AppleMyungjo", serif;
 }
 [data-theme=light] {
-  --bg: #eef2f7; --panel: #ffffff; --panel2: #f1f4f9; --line: #dfe4ec; --text: #1d2330; --muted: #6b7385;
-  --accent: #3d74f0; --me: #8a5cf6; --boss: #e05a5f; --shadow: 0 1px 2px rgba(20,30,60,.06), 0 4px 14px rgba(20,30,60,.05);
-  --navbg: rgba(255,255,255,.9);
+  --bg: #eef2f0; --panel: #ffffff; --panel2: #f1f5f3; --line: #d9e2de; --text: #1c2522; --muted: #66756f;
+  --accent: #2f8f75; --accent-ink: #ffffff; --me: #c47a3a; --boss: #c8655b; --ok: #2f8f75; --hpbar: #d0857a;
+  --shadow: 0 1px 2px rgba(20,40,30,.06), 0 4px 14px rgba(20,40,30,.05); --navbg: rgba(255,255,255,.9);
 }
 [data-theme=light] .card { box-shadow: var(--shadow); }
 [data-theme=light] .msg.err { color: #c4332b; } [data-theme=light] .msg.ok { color: #1f7a33; } [data-theme=light] .msg.info { color: #2c56b8; }
@@ -41,10 +43,10 @@ a { color: inherit; }
 
 button, .btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); font: inherit; cursor: pointer; text-decoration: none; white-space: nowrap; }
 button:hover:not(:disabled), .btn:hover { border-color: #3b4252; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
 button.ghost { background: transparent; }
 button.danger { color: var(--danger); }
-button.on { border-color: var(--accent); background: rgba(91,140,255,.14); }
+button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 button.sm { height: 24px; padding: 0 8px; font-size: 12px; }
 button:disabled { opacity: .4; cursor: not-allowed; }
 .btns { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -91,7 +93,7 @@ label.chk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer
 .unit .hp { font-variant-numeric: tabular-nums; color: var(--muted); }
 .unit.dead { opacity: .4; }
 .bar { height: 5px; background: var(--panel2); border-radius: 3px; overflow: hidden; }
-.bar > i { display: block; height: 100%; background: var(--ok); transition: width .4s; }
+.bar > i { display: block; height: 100%; background: var(--hpbar); border-radius: 3px; transition: width .4s; }
 .bar.boss { height: 7px; } .bar.boss > i { background: var(--boss); }
 
 /* 기록 */
@@ -138,8 +140,8 @@ label.chk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer
 .av.lg { width: 56px; height: 56px; font-size: 16px; }
 .av.수호, .token.수호 { background-color: var(--tank); } .av.지원, .token.지원 { background-color: var(--heal); } .av.공격, .token.공격 { background-color: var(--dps); }
 .av.boss { background-color: var(--boss); border-radius: 12px; }
-.role { font-size: 10.5px; font-weight: 700; padding: 0 5px; border-radius: 4px; line-height: 16px; color: #fff; background: var(--none); }
-.role.수호 { background: var(--tank); } .role.지원 { background: var(--heal); } .role.공격 { background: var(--dps); }
+.role { font-size: 10.5px; font-weight: 700; padding: 0 8px; border-radius: 999px; line-height: 17px; color: var(--muted); border: 1.5px solid currentColor; background: transparent; }
+.role.수호 { color: var(--tank); } .role.지원 { color: var(--heal); } .role.공격 { color: var(--dps); }
 .member { display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 8px; border: 1px solid transparent; }
 .member + .member { margin-top: 4px; }
 .member.me { border-color: var(--me); }
@@ -181,3 +183,40 @@ label.chk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer
 .inv .cnt { display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px 2px 8px; font-size: 12px; }
 .inv .cnt input { width: 44px; height: 24px; text-align: right; }
 .actions button.item { border-style: dashed; }
+
+/* 참고 디자인: 동그란 두상 + 점선 고리, 명조 이름, 원형 타이머, 말풍선 채팅 */
+.av { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--line); }
+.av.lg { box-shadow: 0 0 0 3px var(--panel), 0 0 0 4px var(--accent), 0 0 0 8px var(--panel), 0 0 0 9px color-mix(in srgb, var(--accent) 35%, transparent); margin: 6px; }
+.av.lg.boss { box-shadow: 0 0 0 3px var(--panel), 0 0 0 4px var(--boss); border-radius: 50%; }
+.member .line1, .line1.name, .card-h h2 { font-family: var(--serif); }
+.member .line1 { font-size: 14px; }
+.panel-h { background: transparent; color: var(--muted); justify-content: flex-start; padding: 0 0 8px; margin: 0 0 8px; border-bottom: 1px solid var(--line); border-radius: 0; letter-spacing: .04em; }
+.panel-h.boss { background: transparent; color: var(--boss); }
+.token.pic, .av { background-size: cover; background-position: center; }
+.token.pic { width: 86%; height: 86%; box-shadow: 0 0 0 2px var(--panel); }
+.token.pic.me { outline: 2px solid var(--me); }
+.cell .bosspic { width: 90%; height: 90%; border-radius: 50%; background-size: cover; background-position: center; box-shadow: 0 0 0 2px rgba(255,255,255,.6); }
+.ring { position: relative; width: 132px; height: 132px; margin: 10px auto 2px; }
+.ring svg { width: 100%; height: 100%; }
+.ring circle { fill: none; stroke-width: 8; }
+.ring .track { stroke: var(--panel2); }
+.ring .arc { stroke: var(--hpbar); stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
+.ring.low .arc { stroke: var(--danger); }
+.ring .t { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 700 24px/1 ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .02em; }
+.chatbox { display: flex; flex-direction: column; }
+.chatlist { max-height: 300px; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 2px; }
+.cm { max-width: 88%; align-self: flex-start; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; }
+.cm.mine { align-self: flex-end; }
+.cm .h { display: flex; gap: 8px; align-items: baseline; font-size: 12px; }
+.cm .h b { color: var(--accent); font-weight: 700; }
+.cm.gm .h b { color: var(--warn); }
+.cm .h time { color: var(--muted); font: 11px ui-monospace, Consolas, monospace; }
+.cm .x { font-size: 12.5px; margin-top: 2px; white-space: pre-wrap; word-break: break-word; }
+.chatform { display: flex; gap: 6px; margin-top: 8px; }
+.chatform button { height: 30px; }
+.imgfield { display: flex; gap: 12px; align-items: center; }
+.btn.sm-btn { height: 24px; padding: 0 8px; font-size: 12px; cursor: pointer; }
+.team-mini { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.team-mini > div { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.actions.items { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.mini-grid { max-width: 280px; margin: 10px auto 0; } .mini-grid .grid { max-width: 280px; }

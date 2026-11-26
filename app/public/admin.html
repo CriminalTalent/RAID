@@ -18,7 +18,7 @@ let section = 'battle';
 let sel = {};                         // 표마다 고른 줄 번호
 let draft = {};                       // 표마다 편집 중인 사본 (저장 전)
 let dirty = {};
-const form = { slots: [], creature: '', auto: false, positions: {}, placing: null, hps: {} };
+const form = { slots: [], creature: '', auto: false, hps: {} };
 function cellsOf(pos, size) {
   const p = parsePos(pos); if (!p) return [];
   const m = /(\d+)\s*x\s*(\d+)/i.exec(size || '1x1') || [0, 1, 1];
@@ -43,7 +43,7 @@ const SCHEMA = {
       [7, '민첩', 'num'], [8, '기술', 'num'], [9, '행운', 'num'], [13, '역할', ROLES],
       [15, '장비 (종류마다 하나씩 · 누르면 착용/해제 · 전투 스탯에 보너스가 더해져요)', 'equip'],
       [16, '소지품 (전투 중 쓸 수 있는 회복 아이템 개수 · 쓰면 1개씩 줄어요)', 'inv'],
-      [14, '이미지 주소 (선택)', 'wide']
+      [14, '두상 이미지 (선택 · 얼굴이 가운데 오게 정사각형으로 잘려요)', 'image']
     ],
     blank: () => ['', '', '', '1', '50', '10', '10', '10', '10', '10', '50', '', '하', '공격', '', '', '']
   },
@@ -55,7 +55,7 @@ const SCHEMA = {
       [5, '건강', 'num'], [6, '내구도', 'num'], [7, '마법능력', 'num'], [8, '민첩', 'num'],
       [9, '기술', 'num'], [10, '행운', 'num'], [13, '명중 기본 (빈칸=60)', 'num'], [14, '회피 기본', 'num'],
       [4, '고정 스킬 (선택)', 'bossskill'], [16, '이 보스가 쓰는 스킬 (누르면 넣기/빼기 · 아무것도 안 고르면 전체)', 'skilllist'],
-      [11, '메모', 'wide'], [17, '이미지 주소 (선택)', 'wide']
+      [11, '메모', 'wide'], [17, '보스 이미지 (선택)', 'image']
     ],
     blank: () => ['', '새 크리쳐', 'D4', '1x1', '', '200', '10', '15', '5', '5', '5', '', '0', '', '', '하', '', '']
   },
@@ -91,6 +91,21 @@ const SCHEMA = {
   }
 };
 const FIXED_KINDS = ['teleport', 'pass'];
+/* 올린 사진을 정사각형(256px)으로 잘라 줄인다. 두상은 위쪽 기준으로 자른다. */
+function squareImage(file, anchor) {
+  return new Promise((ok, fail) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const n = Math.min(img.width, img.height), S = 256, c = document.createElement('canvas');
+      c.width = c.height = S;
+      const sx = (img.width - n) / 2, sy = anchor === 'top' ? Math.max(0, (img.height - n) * 0.15) : (img.height - n) / 2;
+      c.getContext('2d').drawImage(img, sx, sy, n, n, 0, 0, S, S);
+      URL.revokeObjectURL(url); ok(c.toDataURL('image/jpeg', 0.86));
+    };
+    img.onerror = () => fail(new Error('이미지를 읽지 못했어요.'));
+    img.src = url;
+  });
+}
 const H = () => ({});
 const BONUS = [[3, '내구도'], [4, '마법능력'], [5, '민첩'], [6, '기술'], [7, '행운']];
 const bonusText = r => BONUS.filter(([c]) => +r[c]).map(([c, l]) => `${l} ${+r[c] > 0 ? '+' : ''}${+r[c]}`).join(', ');
@@ -146,7 +161,8 @@ function bindSettings() {
   };
 }
 
-function render() {
+function render() { section === 'battle' ? keepInputs(draw) : draw(); }
+function draw() {
   if (!view) return;
   const counts = k => Math.max(0, (view.tables[k] || []).length - 1);
   const items = [['battle', '전투 진행', view.battles.filter(b => b.active).length], ['runners', '러너', counts('runners')],
@@ -169,14 +185,16 @@ function battleHTML() {
   form.slots = form.slots.filter(id => roster.some(r => r[0] === id) && !busy.has(id));
   if (!form.creature || !view.creature_names.includes(form.creature)) form.creature = view.creature_names[0] || '';
   const free = id => !busy.has(id) && !form.slots.includes(id);
-  const slotHTML = (id, i) => `<div class="slot ${form.placing === id ? 'on' : ''}">
+  const slotHTML = (id, i) => `<div class="slot">
       <select data-slot="${i}">${roster.filter(r => r[0] === id || free(r[0])).map(r => `<option value="${esc(r[0])}" ${r[0] === id ? 'selected' : ''}>${esc(r[1] || r[0])} · ${esc(r[13] || '역할 없음')}</option>`).join('')}</select>
       <label class="hpin" title="이 전투를 시작할 때의 체력 (최대 ${esc(rowOf(id)[10] || rowOf(id)[4])})">HP<input data-hp="${esc(id)}" inputmode="numeric" value="${esc(form.hps[id] ?? (rowOf(id)[10] || rowOf(id)[4] || ''))}"></label>
-      <button class="sm ${form.placing === id ? 'on' : ''}" data-place="${esc(id)}">${form.positions[id] ? '위치 ' + esc(form.positions[id]) : '위치 지정'}</button>
       <button class="sm ghost" data-unslot="${i}" title="빼기">✕</button></div>`;
   const crow = view.tables.creatures.slice(1).find(r => r[1] === form.creature) || [];
-  const fake = { creature: { name: crow[1], pos: (crow[2] || 'D4').toUpperCase(), facing: crow[15], cells: cellsOf(crow[2] || 'D4', crow[3] || '1x1') },
-    runners: form.slots.filter(id => form.positions[id]).map(id => ({ name: id, display: rowOf(id)[1] || id, role: rowOf(id)[13], hp: 1, pos: form.positions[id] })) };
+  const fake = { creature: { name: crow[1], img: crow[17], pos: (crow[2] || 'D4').toUpperCase(), facing: crow[15], cells: cellsOf(crow[2] || 'D4', crow[3] || '1x1') }, runners: [] };
+  const preview = `<div class="member">${avatarHTML(crow[1] || '?', '', crow[17], 'lg boss')}<div class="body"><div class="line1 name">${esc(crow[1] || '')}<span class="hp">HP ${esc(crow[5] || '-')}</span></div>
+      <div class="act">머리 ${esc(crow[2] || 'D4')} ${ARROW[crow[15]] || ''} · ${esc(crow[3] || '1x1')} · 내구 ${esc(crow[6] || 0)} · 마법 ${esc(crow[7] || 0)} · 민첩 ${esc(crow[8] || 0)}</div></div></div>
+    <div class="team-mini">${form.slots.map(id => `<div title="${esc(rowOf(id)[1] || id)}">${avatarHTML(rowOf(id)[1] || id, rowOf(id)[13], rowOf(id)[14])}<span>${esc(rowOf(id)[1] || id)}</span></div>`).join('')}</div>
+    <div class="mini-grid">${gridHTML(fake)}</div>`;
   let h = `<div class="card"><div class="card-h"><h2>새 전투</h2><button class="sm" id="heal">러너 전원 체력 회복</button></div>
     <div class="bt">
       <div>
@@ -187,9 +205,9 @@ function battleHTML() {
         ${form.slots.map(slotHTML).join('') || '<div class="sub" style="margin-bottom:6px">아래 버튼으로 참여자를 넣으세요.</div>'}
         <div class="btns"><button class="sm" id="addslot" ${roster.some(r => free(r[0])) ? '' : 'disabled'}>+ 참여자 추가</button>
           <button class="primary" id="start" ${form.slots.length ? '' : 'disabled'}>전투 시작</button></div>
-        <p class="sub" style="margin-top:8px">HP: 이 전투를 시작할 때의 체력이에요(최대 건강까지). 시작 위치: 참여자의 "위치 지정"을 누르고 오른쪽 격자를 클릭하세요. 정하지 않은 사람은 전투 시작 후 각자 고릅니다.</p>
+        <p class="sub" style="margin-top:8px">HP: 이 전투를 시작할 때의 체력이에요(최대 건강까지). 시작 위치는 전투가 시작되면 참여자가 각자 자기 링크에서 고릅니다.</p>
       </div>
-      <div class="center" id="placegrid">${gridHTML(fake, { pickable: form.placing ? (p => !fake.creature.cells.includes(p)) : null })}</div>
+      <div>${preview}</div>
     </div></div>`;
   const list = view.battles.slice().reverse();
   if (focusBattle) list.sort((a, b) => (b.id === focusBattle) - (a.id === focusBattle));
@@ -204,7 +222,7 @@ function battleCard(b) {
   const disp = id => (view.tables.runners.find(r => r[0] === id) || [])[1] || id;
   const roleOf = id => (view.tables.runners.find(r => r[0] === id) || [])[13] || '';
   const links = Object.entries(b.tokens).map(([n, t]) => {
-    const url = `${base}/play?t=${t}`;
+    const url = `${base}/p/${t}`;
     return `<div class="linkrow"><span>${esc(disp(n))}</span><code title="${esc(url)}">${esc(url)}</code>
       <span class="btns" style="flex-wrap:nowrap"><button class="sm" data-copy="${esc(url)}">복사</button><a class="btn" style="height:24px;padding:0 8px;font-size:12px" href="${esc(url)}" target="raid-play-${esc(n)}">열기</a></span></div>`;
   }).join('');
@@ -227,39 +245,37 @@ function battleCard(b) {
       <div>${lb ? statusHTML(lb, skew) + `<div data-grid="${b.id}">${gridHTML(lb, { pickable: b.awaiting_boss ? () => true : null, picks: p.cells })}</div><div class="units">${bossHTML(lb)}${runnersHTML(lb)}</div>` : ''}</div>
       <div>${boss}
         <div class="sec" ${boss ? '' : 'style="margin-top:0"'}>이번 라운드 행동</div><div class="units" style="margin:0">${acts}</div>
-        <div class="sec">참여자 링크</div>${links}
+        <div class="sec">참여자 링크 (한 사람에 하나씩)</div>${links}
+        <div class="sec">관전자 링크 (모두 같은 주소)</div>
+        <div class="linkrow"><span>관전</span><code title="${esc(base + '/w/' + b.id)}">${esc(base + '/w/' + b.id)}</code>
+          <span class="btns" style="flex-wrap:nowrap"><button class="sm" data-copy="${esc(base + '/w/' + b.id)}">복사</button><a class="btn" style="height:24px;padding:0 8px;font-size:12px" href="/w/${esc(b.id)}" target="raid-watch">열기</a></span></div>
         <div class="btns" style="flex-wrap:nowrap;margin-top:6px"><input data-share placeholder="공유 주소 (share.bat 주소)" value="${esc(shareBase)}"><button class="sm" data-sharesave>적용</button></div>
+        <div class="sec">채팅 (진행자로 보내기)</div>${lb ? chatHTML(lb, { mine: 'admin', canSend: true }) : ''}
         <div class="sec">기록</div><div class="log" style="max-height:220px">${lb ? logHTML(lb, 6) : ''}</div>
       </div>
     </div></div>`;
 }
 
 function bindBattle() {
-  $('creature').onchange = () => { form.creature = $('creature').value; form.positions = {}; render(); };
+  $('creature').onchange = () => { form.creature = $('creature').value; render(); };
+  bindChat((id, text) => act('/api/admin/chat', { id, text }));
   $('auto').onchange = () => form.auto = $('auto').checked;
   document.querySelectorAll('[data-slot]').forEach(sel_ => sel_.onchange = () => {
     const i = +sel_.dataset.slot, old = form.slots[i]; form.slots[i] = sel_.value;
-    if (form.positions[old]) { form.positions[sel_.value] = form.positions[old]; delete form.positions[old]; }
+    delete form.hps[old];
     render();
   });
-  document.querySelectorAll('[data-unslot]').forEach(b => b.onclick = () => { const id = form.slots.splice(+b.dataset.unslot, 1)[0]; delete form.positions[id]; render(); });
+  document.querySelectorAll('[data-unslot]').forEach(b => b.onclick = () => { form.slots.splice(+b.dataset.unslot, 1); render(); });
   document.querySelectorAll('[data-hp]').forEach(i => i.oninput = () => { form.hps[i.dataset.hp] = i.value.trim(); });
-  document.querySelectorAll('[data-place]').forEach(b => b.onclick = () => { form.placing = form.placing === b.dataset.place ? null : b.dataset.place; render(); });
   $('addslot').onclick = () => {
     const busy = new Set(view.battles.filter(x => x.active).flatMap(x => x.runners));
     const next = view.tables.runners.slice(1).map(r => r[0]).find(id => !busy.has(id) && !form.slots.includes(id));
     if (next) { form.slots.push(next); render(); }
   };
-  bindGrid($('placegrid'), pos => {
-    const id = form.placing; if (!id) return;
-    Object.keys(form.positions).forEach(k => { if (form.positions[k] === pos) delete form.positions[k]; });
-    form.positions[id] = pos;
-    const nextId = form.slots.find(x => !form.positions[x]); form.placing = nextId || null; render();
-  });
   $('start').onclick = async () => {
     const hps = Object.fromEntries(form.slots.map(id => [id, document.querySelector(`[data-hp="${CSS.escape(id)}"]`)?.value.trim() || '']));
-    const ok = await act('/api/admin/start', { runners: form.slots, creature: form.creature, auto: form.auto, positions: form.positions, hps }, '전투를 시작했습니다. 참여자 링크를 보내 주세요.');
-    if (ok) { form.slots = []; form.positions = {}; form.placing = null; form.hps = {}; render(); }
+    const ok = await act('/api/admin/start', { runners: form.slots, creature: form.creature, auto: form.auto, hps }, '전투를 시작했습니다. 참여자 링크를 보내 주세요.');
+    if (ok) { form.slots = []; form.hps = {}; render(); }
   };
   $('heal').onclick = () => act('/api/admin/heal', {}, '러너 전원의 체력을 최대로 채웠습니다.');
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
@@ -309,6 +325,12 @@ function fieldHTML(k, r, [col, label, type]) {
     const on = new Set(String(v).split(',').map(x => x.trim()).filter(Boolean));
     const all = (draft.boss_skills || view.tables.boss_skills).slice(1).map(x => x[0]).filter(Boolean);
     input = `<div class="chips">${all.map(n => `<button type="button" class="sm ${on.has(n) ? 'on' : ''}" data-chip="${col}" data-val="${esc(n)}">${on.has(n) ? '✓ ' : '+ '}${esc(n)}</button>`).join('')}</div>`;
+    return `<div class="f wide"><label>${esc(label)}</label>${input}</div>`;
+  } else if (type === 'image') {
+    input = `<div class="imgfield">${avatarHTML(r[1] || r[0] || '?', k === 'runners' ? r[13] : '', v, k === 'creatures' ? 'lg boss' : 'lg')}
+      <div style="flex:1;display:grid;gap:6px"><div class="btns"><label class="btn sm-btn">사진 올리기<input type="file" accept="image/*" data-img="${col}" hidden></label>
+        ${v ? `<button type="button" class="sm ghost" data-imgclear="${col}">지우기</button>` : ''}</div>
+        <input id="${id}" data-col="${col}" value="${esc(v)}" placeholder="또는 이미지 주소 붙여넣기"></div></div>`;
     return `<div class="f wide"><label>${esc(label)}</label>${input}</div>`;
   } else if (type === 'equip') {
     const on = new Set(String(v).split(',').map(x => x.trim()).filter(Boolean));
@@ -375,6 +397,15 @@ function bindEditor(k) {
     mark(); $('save').disabled = false; $('revert').disabled = false;
     $('save').insertAdjacentHTML('beforebegin', '<span class="tag warn">저장 안 됨</span>');
   };
+  document.querySelectorAll('[data-img]').forEach(inp => inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    try {
+      const data = await squareImage(f, k === 'runners' ? 'top' : 'center');
+      const res = await api('/api/admin/upload', { data });
+      rows[sel[k] + 1][+inp.dataset.img] = res.url; mark(); render();
+    } catch (e) { msg = { cls: 'err', text: e.message }; render(); }
+  });
+  document.querySelectorAll('[data-imgclear]').forEach(b => b.onclick = () => { rows[sel[k] + 1][+b.dataset.imgclear] = ''; mark(); render(); });
   document.querySelectorAll('[data-equip]').forEach(b => b.onclick = () => {
     const r = rows[sel[k] + 1], n = b.dataset.equip, type = b.dataset.type;
     const gear = Object.fromEntries(itemRows().map(x => [x[0], x[1]]));

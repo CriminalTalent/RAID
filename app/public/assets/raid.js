@@ -98,8 +98,8 @@ function gridHTML(b, opts = {}) {
       const cls = ['cell', bossCells.has(pos) && 'boss', skillCells.has(pos) && 'skill', opts.inrange?.has(pos) && 'inrange',
         opts.pickable?.(pos) && 'pick', opts.picks?.has(pos) && 'picked'].filter(Boolean).join(' ');
       let inner = '';
-      if (r) inner = `<div class="token ${esc(r.role || '')} ${r.name === opts.me ? 'me' : ''} ${done.has(r.name) ? 'done' : ''}" title="${esc(r.display)}${r.role ? ' · ' + esc(r.role) : ''}">${esc(short(r.display))}</div>`;
-      else if (pos === c.pos) inner = `${esc(short(c.name))}<span class="arrow">${ARROW[c.facing] || ''}</span>`;
+      if (r) inner = `<div class="token ${esc(r.role || '')} ${r.img ? 'pic' : ''} ${r.name === opts.me ? 'me' : ''} ${done.has(r.name) ? 'done' : ''}" title="${esc(r.display)}${r.role ? ' · ' + esc(r.role) : ''}"${r.img ? ` style="background-image:url('${esc(r.img)}')"` : ''}>${r.img ? '' : esc(short(r.display))}</div>`;
+      else if (pos === c.pos) inner = `${c.img ? `<span class="bosspic" style="background-image:url('${esc(c.img)}')"></span>` : esc(short(c.name))}<span class="arrow">${ARROW[c.facing] || ''}</span>`;
       h += `<div class="${cls}" data-pos="${pos}" title="${pos}">${inner}</div>`;
     });
   });
@@ -137,6 +137,7 @@ function startTimers(getBattles, getSkew) {
   setInterval(() => {
     document.querySelectorAll('[data-timer]').forEach(el => { const b = getBattles().find(x => x.id === el.dataset.timer); el.textContent = timerText(b, getSkew()); });
     document.querySelectorAll('[data-bigtimer]').forEach(el => { const b = getBattles().find(x => x.id === el.dataset.bigtimer); el.textContent = bigTimer(b, getSkew()); });
+    document.querySelectorAll('[data-ring]').forEach(el => { const b = getBattles().find(x => x.id === el.dataset.ring); setRing(el, b, getSkew()); });
   }, 1000);
 }
 
@@ -188,4 +189,52 @@ function cheerFeedHTML(b, limit = 8) {
   const w = b.watchers || [];
   return `<div class="cheerfeed">${list.map(c => `<div><b>${esc(c.name)}</b>${esc(c.text)}</div>`).join('') || '<div class="sub" style="border:0">아직 응원이 없어요.</div>'}</div>
     <div class="watchers">관전 중 ${w.length}명${w.length ? ' · ' + w.slice(0, 12).map(esc).join(', ') + (w.length > 12 ? ' …' : '') : ''}</div>`;
+}
+
+/* 원형 타이머: 남은 시간만큼 고리가 줄어든다 */
+const RING_C = 2 * Math.PI * 52;
+function ringHTML(b, skew) {
+  return `<div class="ring" data-ring="${esc(b.id)}"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" stroke-dasharray="${RING_C}" stroke-dashoffset="0" transform="rotate(-90 60 60)"/></svg><span class="t"></span></div>`;
+}
+function setRing(el, b, skew) {
+  const t = el.querySelector('.t'), arc = el.querySelector('.arc');
+  if (!b || !b.active || (b.phase !== 'battle' && b.phase !== 'prep')) {
+    t.textContent = b && !b.active ? '종료' : '··'; arc.style.strokeDashoffset = RING_C; return;
+  }
+  const left = Math.max(0, b.round_started_at + b.action_wait - (Math.floor(Date.now() / 1000) + (skew || 0)));
+  t.textContent = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
+  arc.style.strokeDashoffset = RING_C * (1 - left / Math.max(b.action_wait, 1));
+  el.classList.toggle('low', left <= 30);
+}
+function initRings(getBattles, getSkew) {
+  document.querySelectorAll('[data-ring]').forEach(el => setRing(el, getBattles().find(x => x.id === el.dataset.ring), getSkew()));
+}
+
+/* 채팅: 참여자·진행자는 보내고, 관전자는 보기만 한다. mine = 내 메시지 표시용 키 */
+function chatHTML(b, { mine = '', canSend = false, note = '' } = {}) {
+  const fmt = at => new Date(at * 1000).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const list = (b.chat || []).map(m => `<div class="cm ${m.who === mine ? 'mine' : ''} ${m.role === 'admin' ? 'gm' : ''}">
+      <div class="h"><b>${esc(m.name)}</b><time>${fmt(m.at)}</time></div><div class="x">${esc(m.text)}</div></div>`).join('');
+  return `<div class="chatbox"><div class="chatlist" data-chatlist="${esc(b.id)}">${list || '<div class="empty" style="padding:14px">아직 대화가 없어요.</div>'}</div>
+    ${canSend ? `<form class="chatform" data-chatform="${esc(b.id)}"><input id="chat-${esc(b.id)}" maxlength="200" autocomplete="off" placeholder="메시지 (200자까지)"><button class="primary sm">전송</button></form>` : `<div class="sub" style="margin-top:6px">${esc(note || '관전자는 채팅을 볼 수만 있어요.')}</div>`}</div>`;
+}
+function bindChat(send) {
+  document.querySelectorAll('[data-chatlist]').forEach(el => { el.scrollTop = el.scrollHeight; });
+  document.querySelectorAll('[data-chatform]').forEach(f => f.onsubmit = async ev => {
+    ev.preventDefault();
+    const inp = f.querySelector('input'), text = inp.value.trim(); if (!text) return;
+    inp.value = '';
+    try { await send(f.dataset.chatform, text); }
+    catch (e) { const i = document.getElementById(inp.id) || inp; i.value = text; i.setCustomValidity(e.message); i.reportValidity(); setTimeout(() => i.setCustomValidity(''), 1500); }
+  });
+}
+
+/* 화면을 다시 그려도 입력 중이던 칸(값·커서)이 지워지지 않게 */
+function keepInputs(draw) {
+  const vals = {}, a = document.activeElement;
+  document.querySelectorAll('input[id]:not([type=checkbox]), textarea[id]').forEach(i => { vals[i.id] = i.value; });
+  const focus = a && a.id ? [a.id, a.selectionStart, a.selectionEnd] : null;
+  draw();
+  Object.entries(vals).forEach(([id, v]) => { const i = document.getElementById(id); if (i && i.value !== v && i.type !== 'file') i.value = v; });
+  if (focus) { const i = document.getElementById(focus[0]); if (i) { i.focus(); try { i.setSelectionRange(focus[1], focus[2]); } catch {} } }
 }

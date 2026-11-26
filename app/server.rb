@@ -5,10 +5,14 @@
 
 require 'socket'
 require 'uri'
+require 'digest'
+require 'fileutils'
 require_relative 'engine'
 
 class RaidServer
   PUBLIC = File.join(__dir__, 'public')
+  IMG_DIR = File.join(__dir__, 'data', 'img')
+  IMG_TYPES = { 'jpg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp', 'gif' => 'image/gif' }.freeze
   PAGES = {
     '/' => 'index.html',
     '/admin' => 'admin.html',
@@ -48,7 +52,7 @@ class RaidServer
     end
     body = ''
     len = headers['content-length'].to_i
-    body = client.read(len).to_s.force_encoding('UTF-8') if len.positive? && len < 2_000_000
+    body = client.read(len).to_s.force_encoding('UTF-8') if len.positive? && len < 3_000_000
     path, query = target.to_s.split('?', 2)
     params = URI.decode_www_form(query.to_s).to_h rescue {}
     path = path.chomp('/') if path.length > 1
@@ -70,6 +74,18 @@ class RaidServer
   end
 
   def route(method, path, params, headers, body)
+    # 참여자: /p/<개인 링크>, 관전자: /w/<전투 번호>, 관리자: /admin
+    if method == 'GET' && path.match?(%r{\A/p/[A-Za-z0-9_-]+\z})
+      return [200, 'text/html; charset=utf-8', File.read(File.join(PUBLIC, 'play.html'), encoding: 'UTF-8')]
+    end
+    if method == 'GET' && path.match?(%r{\A/w/[A-Za-z0-9]+\z})
+      return [200, 'text/html; charset=utf-8', File.read(File.join(PUBLIC, 'watch.html'), encoding: 'UTF-8')]
+    end
+    if method == 'GET' && (m = path.match(%r{\A/img/([a-f0-9]{16,64}\.(jpg|png|webp|gif))\z}))
+      file = File.join(IMG_DIR, m[1])
+      return [200, IMG_TYPES[m[2]], File.binread(file)] if File.exist?(file)
+    end
+
     if method == 'GET' && PAGES[path]
       file = PAGES[path].start_with?('/') ? PAGES[path] : File.join(PUBLIC, PAGES[path])
       return [200, 'text/html; charset=utf-8', File.read(file, encoding: 'UTF-8')]
@@ -96,6 +112,9 @@ class RaidServer
       notice = @engine.mutex.synchronize { @engine.player_submit!(data['t'], data['command'].to_s) }
       @engine.bump!
       return json('ok' => notice.nil?, 'notice' => notice)
+    when ['POST', '/api/chat']
+      @engine.mutex.synchronize { @engine.player_chat!(data['t'], data['text']) }
+      return json('ok' => true)
     when ['POST', '/api/watch/hello']
       return json('name' => @engine.mutex.synchronize { @engine.watcher_hello!(data['name']) })
     when ['POST', '/api/cheer']
@@ -117,12 +136,26 @@ class RaidServer
         Thread.current[:set_cookie] = ['raid_is_admin=; Path=/; SameSite=Strict; Max-Age=0']
         return json({ 'error' => '관리자 로그인이 필요합니다.', 'login' => true }, 401)
       end
+      return upload(data) if method == 'POST' && path == '/api/admin/upload'
       return admin(method, path, data, cookie(headers, 'raid_admin'))
     end
 
     [404, 'text/plain; charset=utf-8', 'Not Found']
   rescue RuntimeError => e
     json({ 'error' => e.message }, 400)
+  end
+
+  # 관리자 화면에서 줄여 보낸 이미지(data URL)를 app/data/img 에 저장하고 주소를 돌려준다
+  def upload(d)
+    m = d['data'].to_s.match(%r{\Adata:image/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/=]+)\z})
+    raise '이미지 파일만 올릴 수 있어요.' unless m
+    bin = m[2].unpack1('m0')
+    raise '이미지가 너무 커요 (1MB까지).' if bin.bytesize > 1_000_000
+    ext = { 'jpeg' => 'jpg' }.fetch(m[1], m[1])
+    name = "#{Digest::SHA1.hexdigest(bin)[0, 20]}.#{ext}"
+    FileUtils.mkdir_p(IMG_DIR)
+    File.binwrite(File.join(IMG_DIR, name), bin)
+    json('url' => "/img/#{name}")
   end
 
   def cookie(headers, name)
@@ -140,11 +173,12 @@ class RaidServer
       when ['GET', '/api/admin'] then nil
       when ['POST', '/api/admin/table'] then e.save_table!(d['key'].to_s, Array(d['rows']))
       when ['POST', '/api/admin/heal'] then e.heal_all!
-      when ['POST', '/api/admin/start'] then e.start_battle!(runners: d['runners'], creature_name: d['creature'].to_s, auto_mode: d['auto'], positions: d['positions'] || {}, hps: d['hps'] || {})
+      when ['POST', '/api/admin/start'] then e.start_battle!(runners: d['runners'], creature_name: d['creature'].to_s, auto_mode: d['auto'], hps: d['hps'] || {})
       when ['POST', '/api/admin/boss'] then e.boss_command!(d['id'], skill: d['skill'], targets: d['targets'], cells: d['cells'])
       when ['POST', '/api/admin/auto'] then e.set_auto!(d['id'], d['on'])
       when ['POST', '/api/admin/settle'] then e.settle_now!(d['id'])
       when ['POST', '/api/admin/end'] then e.end_battle!(d['id'])
+      when ['POST', '/api/admin/chat'] then e.admin_chat!(d['id'], d['text'])
       when ['POST', '/api/admin/password'] then e.change_password!(d['old'], d['new'], token)
       else return [404, 'text/plain; charset=utf-8', 'Not Found']
       end

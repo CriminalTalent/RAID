@@ -163,6 +163,8 @@ class RaidEngine
     @cheers = Hash.new { |h, k| h[k] = { 'counts' => Hash.new(0), 'recent' => [] } }
     @cheer_last = {}
     @watchers = {}
+    @chats = Hash.new { |h, k| h[k] = [] }
+    @chat_last = {}
     settings['admin_key'] ||= SecureRandom.alphanumeric(10)
     unless @store.book('app')['스킬']
       rows = SkillCatalog.default_rows
@@ -321,6 +323,7 @@ class RaidEngine
       cheer = @cheers[b['id']]
       b['cheers'] = { 'counts' => cheer['counts'], 'recent' => cheer['recent'].last(12).reverse }
       b['watchers'] = watcher_names
+      b['chat'] = @chats[b['id']].last(80)
       b['creature']['img'] = c[17].to_s
       b['creature']['omen'] = @sessions[b['id']]&.creature&.dig(:omen).to_s
     end
@@ -703,6 +706,30 @@ class RaidEngine
     c['recent'] << { 'name' => n, 'kind' => kind.to_s, 'text' => CHEERS[kind.to_s], 'at' => Time.now.to_i }
     c['recent'].shift while c['recent'].size > 30
     bump!
+  end
+
+  # ── 채팅: 참여자와 진행자(관리자)만 보낼 수 있고, 모든 화면에서 보인다 ──
+  def chat!(battle_id, name, role, text, key)
+    s = @sessions[battle_id.to_s] or raise '전투를 찾지 못했습니다.'
+    text = text.to_s.gsub(/[[:cntrl:]]/, ' ').strip
+    raise '내용을 입력하세요.' if text.empty?
+    raise '한 번에 200자까지 보낼 수 있어요.' if text.length > 200
+    raise '조금 천천히 보내 주세요.' if @chat_last[key] && Time.now - @chat_last[key] < 1
+    @chat_last[key] = Time.now
+    @chats[s.id] << { 'name' => name.to_s, 'role' => role, 'text' => text, 'at' => Time.now.to_i, 'who' => key }
+    @chats[s.id].shift while @chats[s.id].size > 200
+    bump!
+  end
+
+  def player_chat!(token, text)
+    s, name = player_for(token)
+    raise '링크가 올바르지 않습니다.' unless s
+    disp = runner_row(name).to_a[1].to_s
+    chat!(s.id, disp.empty? ? name : disp, 'runner', text, "p:#{name}")
+  end
+
+  def admin_chat!(battle_id, text)
+    chat!(battle_id, '진행자', 'admin', text, 'admin')
   end
 
   # ── 관리자 로그인: 비밀번호 → 브라우저 쿠키(12시간). 5번 틀리면 10분 잠금 ──
