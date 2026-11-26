@@ -79,7 +79,7 @@ function draw() {
         ${cheerMsg ? `<div class="msg err">${esc(cheerMsg)}</div>` : ''}
         ${b.active ? `<div class="cheerbtns">${Object.entries(CHEERS).map(([k, t]) => `<button data-cheer="${k}">${t}<span class="n">${b.cheers?.counts?.[k] || ''}</span></button>`).join('')}</div>` : '<div class="sub">끝난 전투에는 응원할 수 없어요.</div>'}
         ${cheerFeedHTML(b, 4)}</div>
-      <div class="card"><div class="card-h"><h2>전투 기록</h2><span class="sub">최신이 위</span></div><div class="log" style="max-height:460px">${logHTML(b)}</div></div>
+      <div class="card"><div class="card-h"><h2>전투 기록</h2><span class="sub">최신이 위</span></div><div class="log" style="max-height:460px">${logHTML(b, b.active ? 30 : 200)}</div></div>
     </div>
   </div>`;
   document.querySelectorAll('[data-cheer]').forEach(x => x.onclick = () => cheer(x.dataset.cheer));

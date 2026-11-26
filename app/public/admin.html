@@ -39,7 +39,7 @@ const SCHEMA = {
     fields: [
       [0, 'ID'], [1, '표시 이름'], [2, '팀', 'team'], [3, '팀 패시브 (둘 중 하나)', 'passive'],
       [4, '현재 건강', 'num'], [10, '최대 건강', 'num'], [5, '내구도', 'num'], [6, '마법능력', 'num'],
-      [7, '민첩', 'num'], [8, '기술', 'num'], [9, '행운', 'num'], [13, '역할', ROLES], [17, '크레딧 (승리 보상·패배 압수가 여기에 반영)', 'num'],
+      [7, '민첩', 'num'], [8, '기술', 'num'], [9, '행운', 'num'], [13, '역할', ROLES], [11, '전용 스킬 (누르면 넣기/빼기 · 기본 스킬 말고 이 러너만 더 쓸 수 있어요)', 'myskills'], [17, '크레딧 (승리 보상·패배 압수가 여기에 반영)', 'num'],
       [15, '장비 (종류마다 하나씩 · 누르면 착용/해제 · 전투 스탯에 보너스가 더해져요)', 'equip'],
       [16, '소지품 (전투 중 쓸 수 있는 회복 아이템 개수 · 쓰면 1개씩 줄어요)', 'inv'],
       [14, '두상 이미지 (선택 · 얼굴이 가운데 오게 정사각형으로 잘려요)', 'image']
@@ -337,6 +337,12 @@ function fieldHTML(k, r, [col, label, type]) {
   } else if (type === 'skilllist') {
     const on = new Set(String(v).split(',').map(x => x.trim()).filter(Boolean));
     const all = (draft.boss_skills || view.tables.boss_skills).slice(1).map(x => x[0]).filter(Boolean);
+    input = `<div class="chips">${all.map(n => `<button type="button" class="sm ${on.has(n) ? 'on' : ''}" data-chip="${col}" data-val="${esc(n)}">${on.has(n) ? '✓ ' : '+ '}${esc(n)}</button>`).join('')}</div>`;
+    return `<div class="f wide"><label>${esc(label)}</label>${input}</div>`;
+  } else if (type === 'myskills') {
+    const on = new Set(String(v).split(',').map(x => x.trim()).filter(Boolean));
+    const yes = x => ['o', 'y', 'yes', '예', 'true', '1', '✓', 'v'].includes(String(x || '').trim().toLowerCase());
+    const all = (draft.runner_skills || view.tables.runner_skills || [[]]).slice(1).filter(x => x[0] && !yes(x[12]) && x[2] !== 'heal_fixed').map(x => x[0]);
     input = `<div class="chips">${all.map(n => `<button type="button" class="sm ${on.has(n) ? 'on' : ''}" data-chip="${col}" data-val="${esc(n)}">${on.has(n) ? '✓ ' : '+ '}${esc(n)}</button>`).join('')}</div>`;
     return `<div class="f wide"><label>${esc(label)}</label>${input}</div>`;
   } else if (type === 'image') {
