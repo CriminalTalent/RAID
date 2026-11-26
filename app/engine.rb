@@ -188,7 +188,7 @@ class RaidEngine
     @store.save!
   end
 
-  RUNNER_HEADER = %w[ID 이름 팀 패시브선택 건강 내구도 마법능력 민첩 기술 행운 최대건강 스킬2 방향 역할 이미지 장비 소지품].freeze
+  RUNNER_HEADER = %w[ID 이름 팀 패시브선택 건강 내구도 마법능력 민첩 기술 행운 최대건강 스킬2 방향 역할 이미지 장비 소지품 크레딧].freeze
   ITEM_HEADER = %w[이름 종류 회복량 내구도 마법능력 민첩 기술 행운 설명].freeze
   ITEM_TYPES = %w[회복 무기 갑옷 장신구].freeze
   # 아이템 표의 보너스 칸 번호 → 전투 스탯 키
@@ -236,7 +236,7 @@ class RaidEngine
     pas = PASSIVES[team[pick.to_s == '2' ? 3 : 2].to_s]
     { 'team' => team[1].to_s, 'passive' => pas ? pas[2] : '', 'desc' => pas ? pas[3] : '' }
   end
-  CREATURE_HEADER = %w[활성 이름 위치 크기 현재스킬 건강 내구도 마법능력 민첩 기술 행운 비고 보상크레딧 명중기본 회피기본 방향 스킬목록 이미지].freeze
+  CREATURE_HEADER = %w[활성 이름 위치 크기 현재스킬 건강 내구도 마법능력 민첩 기술 행운 비고 보상크레딧 명중기본 회피기본 방향 스킬목록 이미지 패배압수].freeze
 
   # 예전 데이터 파일에 새 칸(역할/이미지/스킬목록)을 붙이고, 순간이동을 1칸 이동으로 바꾼다.
   def migrate_tables!
@@ -260,15 +260,16 @@ class RaidEngine
       end
       table_rows('creature', '스탯').each { |r| r[16] = r[16].to_s.sub('탱커 버스터', '집중 강타') }
     end
+    unless @store.book('app')['아이템']
+      sample = JSON.parse(File.read(File.join(APP_DIR, 'data', 'sample.json'), encoding: 'UTF-8'))
+      @store.book('app')['아이템'] = sample.dig('books', 'app', '아이템') || [ITEM_HEADER.dup]
+    end
+    table_rows('runner', '스탯').each { |r| r[17] = '0' if r[17].to_s.empty? }
     unless @store.book('app')['팀']
       @store.book('app')['팀'] = [TEAM_HEADER.dup] + DEFAULT_TEAMS.map { |t| t.first(5) }
       by_house = DEFAULT_TEAMS.to_h { |t| [t[5], t[0]] }
       (@store.book('runner')['스탯'] || [])[0]&.then { |h| h[2] = '팀' }
       table_rows('runner', '스탯').each { |r| r[2] = by_house.fetch(r[2].to_s.strip, r[2].to_s) }
-    end
-    unless @store.book('app')['아이템']
-      sample = JSON.parse(File.read(File.join(APP_DIR, 'data', 'sample.json'), encoding: 'UTF-8'))
-      @store.book('app')['아이템'] = sample.dig('books', 'app', '아이템') || [ITEM_HEADER.dup]
     end
   end
 
@@ -440,7 +441,10 @@ class RaidEngine
     book, tab = TABLES.fetch(key) { raise '알 수 없는 표입니다.' }
     rows = Array(rows).map { |r| Array(r).map { |v| v.to_s.strip } }
     case key
-    when 'runners' then check_unique!(rows, 0, 'ID')
+    when 'runners'
+      check_unique!(rows, 0, 'ID')
+      ids = team_rows.map { |r| r[0].to_s }
+      rows[1..].to_a.each { |r| raise "'#{r[1]}'의 팀을 목록에서 골라 주세요." unless r[2].to_s.empty? || ids.include?(r[2].to_s) }
     when 'creatures' then check_unique!(rows, 1, '이름')
     when 'boss_skills' then check_unique!(rows, 0, '스킬명')
     when 'runner_skills' then SkillCatalog.validate!(rows)
@@ -454,9 +458,6 @@ class RaidEngine
       rows[1..].to_a.each do |r|
         [r[2], r[3]].each { |c| raise "'#{r[1]}'의 패시브를 목록에서 골라 주세요." unless c.to_s.empty? || PASSIVES.key?(c.to_s) }
       end
-    when 'runners'
-      ids = team_rows.map { |r| r[0].to_s }
-      rows[1..].to_a.each { |r| raise "'#{r[1]}'의 팀을 목록에서 골라 주세요." unless r[2].to_s.empty? || ids.include?(r[2].to_s) }
     end
     @store.replace_tab!(book, tab, rows)
     install_skills! if %w[runner_skills items].include?(key)
@@ -593,6 +594,31 @@ class RaidEngine
     tick!
   end
 
+  # 승리: 보스에 정한 보상만큼 참여자 전원 크레딧 +, 패배(전원 전투불능): 정한 만큼 압수 (0 아래로는 안 내려감)
+  def settle_credits!(s, text)
+    crow = table_rows('creature', '스탯').find { |r| r[1].to_s.strip == s.creature[:name].to_s.strip }.to_a
+    if text.start_with?('[승리]')
+      amount = crow[12].to_i
+      return '' unless amount.positive?
+      s.runner_names.each { |id| (row = runner_row(id)) && row[17] = (row[17].to_i + amount).to_s }
+      @store.save!
+      "\n[보상] 참여자 전원 크레딧 +#{amount}"
+    elsif text.start_with?('[패배]')
+      amount = crow[18].to_i
+      return '' unless amount.positive?
+      lines = s.runner_names.map do |id|
+        row = runner_row(id) or next
+        before = row[17].to_i
+        row[17] = [before - amount, 0].max.to_s
+        "#{display_of(id)} #{before} → #{row[17]}"
+      end.compact
+      @store.save!
+      "\n[압수] 참여자 전원 크레딧 -#{amount}\n#{lines.join("\n")}"
+    else
+      ''
+    end
+  end
+
   # ── 화면 가운데 띄우는 발동 알림 (오버레이) ──────────────────
   def add_event!(s, kind, who, name, text = '')
     @event_seq += 1
@@ -634,6 +660,7 @@ class RaidEngine
            else
              "[패배] #{s.creature[:name]}에게 전원 전투불능"
            end
+    text += settle_credits!(s, text)
     post_session_thread(s, text, @last_post_time)
     add_event!(s, 'end', s.creature[:name], text.sub(/\A\[(.+?)\].*/m, '\\1'), text)
   end
