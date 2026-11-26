@@ -299,3 +299,7 @@ input, select, textarea { border-radius: 2px; }
 .ovl-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 @keyframes chev { 50% { opacity: .35; } }
 @media (max-width: 760px) { .ovl-main { font-size: 20px; } .chatcard .chatlist { height: 320px; } }
+
+.pwbox { display: flex; gap: 4px; flex: 1; min-width: 0; }
+.pwbox input { flex: 1; min-width: 0; }
+.pwbox .pweye { flex: none; white-space: nowrap; }

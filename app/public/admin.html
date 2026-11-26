@@ -457,6 +457,20 @@ let liveStarted = false;
 function startLive() { if (!liveStarted) { liveStarted = true; live(() => (section === 'battle' && view ? load() : null)); } }
 load();
 startTimers(() => live_.battles || [], () => skew);
+// 비밀번호 칸: 입력은 가려서 보이고, 옆 [보기] 버튼으로 잠깐 확인
+function addEyes() {
+  document.querySelectorAll('input[type=password]:not([data-eye])').forEach(inp => {
+    inp.dataset.eye = '1';
+    const box = document.createElement('span'); box.className = 'pwbox';
+    inp.replaceWith(box); box.appendChild(inp);
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'sm pweye'; b.textContent = '보기';
+    b.title = '입력한 비밀번호 잠깐 보기';
+    b.onclick = () => { const show = inp.type === 'password'; inp.type = show ? 'text' : 'password'; b.textContent = show ? '숨기기' : '보기'; inp.focus(); };
+    box.appendChild(b);
+  });
+}
+addEyes();
+new MutationObserver(addEyes).observe(document.body, { childList: true, subtree: true });
 </script>
 </body>
 </html>
