@@ -168,8 +168,8 @@ function draw() {
     </div>
   </div>`;
 
-  bindGrid($('grid'), p => {
-    if (me.phase === 'prep') return submit(`[${p}]`);
+  bindGrid($('grid'), (p, ev) => {
+    if (me.phase === 'prep') return confirmPop(ev, `${p}, 이곳에 서겠습니까?`, () => submit(`[${p}]`));
     pick.cell = p; flash = null; render();
   });
   document.querySelectorAll('[data-skill]').forEach(b => b.onclick = () => { reset(); pick.skill = b.dataset.skill; flash = null; render(); });
