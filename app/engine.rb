@@ -94,7 +94,12 @@ def web_log_text(text)
     next if line.match?(/DM 또는 멘션|\A형식|\A(공격|지원|방어|순간이동): \[|\A아이템 사용|\A입력 대기|초 후 다음 라운드|\A─+\z/)
     out << line
   end
-  out.join("\n").gsub('순간이동', '이동').gsub(/\n{3,}/, "\n\n").strip
+  text = out.join("\n")
+  RaidEngine::PASSIVES.each_value do |house, _n, label, _d, phrases|
+    phrases.each { |ph| text = text.gsub(/\[#{house}\]( ?[^\n]*#{Regexp.escape(ph)})/) { "[#{label}]#{$1}" } }
+  end
+  text = text.gsub(/\[(그리핀도르|슬리데린|래번클로|후플푸프)\]/, '[팀 패시브]').gsub('[기숙사 패시브]', '[팀 패시브]')
+  text.gsub('순간이동', '이동').gsub(/\n{3,}/, "\n\n").strip
 end
 
 def post_session_thread(session, text, last_post_time)
@@ -183,12 +188,54 @@ class RaidEngine
     @store.save!
   end
 
-  RUNNER_HEADER = %w[ID 이름 기숙사 패시브선택 건강 내구도 마법능력 민첩 기술 행운 최대건강 스킬2 방향 역할 이미지 장비 소지품].freeze
+  RUNNER_HEADER = %w[ID 이름 팀 패시브선택 건강 내구도 마법능력 민첩 기술 행운 최대건강 스킬2 방향 역할 이미지 장비 소지품].freeze
   ITEM_HEADER = %w[이름 종류 회복량 내구도 마법능력 민첩 기술 행운 설명].freeze
   ITEM_TYPES = %w[회복 무기 갑옷 장신구].freeze
   # 아이템 표의 보너스 칸 번호 → 전투 스탯 키
   ITEM_BONUS = { 3 => :dur, 4 => :atk, 5 => :agi, 6 => :tec, 7 => :luck }.freeze
   ROLE_RENAME = { '탱커' => '수호', '딜러' => '공격', '힐러' => '지원' }.freeze
+
+  # 팀 패시브: 계산은 기존 규칙(기숙사 패시브 8종)을 그대로 쓰고, 화면에는 이 이름으로만 보인다.
+  # 코드 => [규칙 내부 이름, 패시브 번호, 보이는 이름, 설명, 기록에서 찾을 문구들]
+  PASSIVES = {
+    'front_guard' => ['그리핀도르', '1', '정면 수호', '보스 정면 1칸에 서 있으면 내구도 +50%', ['적 정면']],
+    'last_stand'  => ['그리핀도르', '2', '역경', '건강이 40% 미만이면 마법능력 +50%', ['건강 40%']],
+    'unscathed'   => ['슬리데린', '1', '무결', '이전 라운드에 피해가 없었으면 마법능력 +50%', ['이전 라운드 무피해']],
+    'watchful'    => ['슬리데린', '2', '관망', '관찰(행동 포기)하면 다음 라운드부터 행운 +10', ['관찰 보너스', '행동을 포기']],
+    'insight'     => ['래번클로', '1', '통찰', '보스가 상태이상이면 마법능력 +50%', ['적 상태이상']],
+    'adapt'       => ['래번클로', '2', '변통', '직전 라운드와 다른 분류의 행동을 하면 기술 +10', ['행동 분류']],
+    'endure'      => ['후플푸프', '1', '인내', '이전 라운드에 맞았으면 내구도 +50%', ['이전 라운드 피격']],
+    'survive'     => ['후플푸프', '2', '불굴', '전투 중 1회, 건강이 0 이하가 되는 것을 막음', ['전투 중 1회', '건강 0 이하', '패시브로']]
+  }.freeze
+  TEAM_HEADER = %w[ID 이름 패시브1 패시브2 설명].freeze
+  DEFAULT_TEAMS = [
+    ['team1', '선봉대', 'front_guard', 'last_stand', '앞에 서서 버티는 팀', '그리핀도르'],
+    ['team2', '그림자단', 'unscathed', 'watchful', '피해를 피하며 기회를 노리는 팀', '슬리데린'],
+    ['team3', '탐구회', 'insight', 'adapt', '상황을 읽고 바꿔 가며 싸우는 팀', '래번클로'],
+    ['team4', '수호단', 'endure', 'survive', '맞으며 버티는 팀', '후플푸프']
+  ].freeze
+
+  def team_rows
+    table_rows('app', '팀').reject { |r| r[0].to_s.strip.empty? }
+  end
+
+  def team_row(id)
+    team_rows.find { |r| r[0].to_s.strip == id.to_s.strip }
+  end
+
+  # 러너의 팀·패시브 선택(1/2) → 기존 규칙이 알아듣는 기숙사·패시브 번호
+  def rule_passive(team_id, pick)
+    team = team_row(team_id) or return ['', '']
+    code = team[pick.to_s == '2' ? 3 : 2].to_s
+    pas = PASSIVES[code] or return ['', '']
+    [pas[0], pas[1]]
+  end
+
+  def passive_info(team_id, pick)
+    team = team_row(team_id) or return nil
+    pas = PASSIVES[team[pick.to_s == '2' ? 3 : 2].to_s]
+    { 'team' => team[1].to_s, 'passive' => pas ? pas[2] : '', 'desc' => pas ? pas[3] : '' }
+  end
   CREATURE_HEADER = %w[활성 이름 위치 크기 현재스킬 건강 내구도 마법능력 민첩 기술 행운 비고 보상크레딧 명중기본 회피기본 방향 스킬목록 이미지].freeze
 
   # 예전 데이터 파일에 새 칸(역할/이미지/스킬목록)을 붙이고, 순간이동을 1칸 이동으로 바꾼다.
@@ -212,6 +259,12 @@ class RaidEngine
         r[10] = r[10].to_s.gsub('탱커가 아니면 위험', '내구도 높은 러너가 받아야 안전').gsub('탱커 대상', '한 명에게').gsub('탱커를', '앞에 선 러너를')
       end
       table_rows('creature', '스탯').each { |r| r[16] = r[16].to_s.sub('탱커 버스터', '집중 강타') }
+    end
+    unless @store.book('app')['팀']
+      @store.book('app')['팀'] = [TEAM_HEADER.dup] + DEFAULT_TEAMS.map { |t| t.first(5) }
+      by_house = DEFAULT_TEAMS.to_h { |t| [t[5], t[0]] }
+      (@store.book('runner')['스탯'] || [])[0]&.then { |h| h[2] = '팀' }
+      table_rows('runner', '스탯').each { |r| r[2] = by_house.fetch(r[2].to_s.strip, r[2].to_s) }
     end
     unless @store.book('app')['아이템']
       sample = JSON.parse(File.read(File.join(APP_DIR, 'data', 'sample.json'), encoding: 'UTF-8'))
@@ -283,7 +336,9 @@ class RaidEngine
     sheet.define_singleton_method(:read_base_stats) do
       super().map do |st|
         bonus = engine.equipment_bonus(st[:id])
-        bonus.empty? ? st : st.merge(bonus.to_h { |k, v| [k, st[k].to_i + v] })
+        st = st.merge(bonus.to_h { |k, v| [k, st[k].to_i + v] }) unless bonus.empty?
+        house, num = engine.rule_passive(st[:house], st[:passive])
+        st.merge(house: house, passive: num)
       end
     end
   end
@@ -319,7 +374,7 @@ class RaidEngine
         row = runners[r['name']] || []
         r['role'] = row[13].to_s
         r['img'] = row[14].to_s
-        r['house'] = row[2].to_s
+        r['house'] = team_row(row[2]).to_a[1].to_s
       end
       c = creatures[b.dig('creature', 'name').to_s] || []
       cheer = @cheers[b['id']]
@@ -363,7 +418,8 @@ class RaidEngine
     'creatures'   => ['creature', '스탯'],
     'boss_skills' => ['creature', '보스스킬'],
     'runner_skills' => ['app', '스킬'],
-    'items' => ['app', '아이템']
+    'items' => ['app', '아이템'],
+    'teams' => ['app', '팀']
   }.freeze
 
   def check_unique!(rows, col, label)
@@ -389,6 +445,18 @@ class RaidEngine
     when 'boss_skills' then check_unique!(rows, 0, '스킬명')
     when 'runner_skills' then SkillCatalog.validate!(rows)
     when 'items' then validate_items!(rows)
+    when 'teams'
+      check_unique!(rows, 0, '팀 ID')
+      check_unique!(rows, 1, '팀 이름')
+      used = table_rows('runner', '스탯').map { |r| r[2].to_s.strip }.reject(&:empty?)
+      gone = used - rows[1..].to_a.map { |r| r[0].to_s }
+      raise "아직 이 팀에 속한 러너가 있어 지울 수 없습니다: #{gone.uniq.join(', ')}" if gone.any?
+      rows[1..].to_a.each do |r|
+        [r[2], r[3]].each { |c| raise "'#{r[1]}'의 패시브를 목록에서 골라 주세요." unless c.to_s.empty? || PASSIVES.key?(c.to_s) }
+      end
+    when 'runners'
+      ids = team_rows.map { |r| r[0].to_s }
+      rows[1..].to_a.each { |r| raise "'#{r[1]}'의 팀을 목록에서 골라 주세요." unless r[2].to_s.empty? || ids.include?(r[2].to_s) }
     end
     @store.replace_tab!(book, tab, rows)
     install_skills! if %w[runner_skills items].include?(key)
@@ -630,6 +698,7 @@ class RaidEngine
       'submitted' => s.actions[name] ? { 'type' => s.actions[name][:type].to_s.sub('순간이동', '이동'), 'target' => s.actions[name][:target] } : nil,
       'prep_done' => s.phase == :prep && ctx[:positions].to_h[name].to_s != '',
       'notice' => @listener.notice_for(name),
+      'team' => passive_info(runner_row(name).to_a[2], runner_row(name).to_a[3]),
       'equipment' => equipment(name).map { |r| { 'name' => r[0], 'type' => r[1], 'bonus' => bonus_text(r) } },
       'items' => item_rows.select { |r| r[1] == '회복' }.filter_map do |r|
         c = item_count(name, r[0])
@@ -707,7 +776,7 @@ class RaidEngine
   end
 
   # ── 관전자: 이름 + 응원 버튼 (채팅 없음) ─────────────────────
-  CHEERS = { 'clap' => '👏 박수', 'fire' => '🔥 힘내!', 'guard' => '🛡️ 버텨!', 'star' => '✨ 멋져요!', 'wow' => '😱 조심!' }.freeze
+  CHEERS = { 'clap' => '박수', 'fire' => '힘내!', 'guard' => '버텨!', 'star' => '멋져요!', 'wow' => '조심!' }.freeze
 
   def clean_name(name)
     n = name.to_s.gsub(/[[:cntrl:]<>]/, '').strip
@@ -819,6 +888,7 @@ class RaidEngine
         'boss_skills' => boss_skill_names,
         'kinds' => SkillCatalog::KINDS,
         'item_types' => ITEM_TYPES,
+        'passives' => PASSIVES.transform_values { |v| { 'label' => v[2], 'desc' => v[3] } },
         'version' => @version,
         'battles' => @sessions.values.map do |s|
           {

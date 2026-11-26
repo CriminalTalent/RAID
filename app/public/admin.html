@@ -30,15 +30,14 @@ const bossPick = {};
 const focusBattle = decodeURIComponent(location.hash.slice(1));
 
 /* ── 표 정의: 칸 번호 → 화면 이름/입력 방식 ─────────────────── */
-const HOUSES = ['', '그리핀도르', '슬리데린', '래번클로', '후플푸프'];
 const FACING = ['하', '상', '좌', '우'];
 const ROLES = ['', '수호', '공격', '지원'];
 const SCHEMA = {
   runners: {
-    title: '러너', keyCol: 0, sub: r => `${r[1] || ''} · ${r[13] || '역할 없음'} · HP ${r[10] || r[4] || '-'}`,
+    title: '러너', keyCol: 0, sub: r => `${r[1] || ''} · ${teamName(r[2]) || '팀 없음'} · ${r[13] || '역할 없음'} · HP ${r[10] || r[4] || '-'}`,
     help: 'ID는 참여 링크와 기록에 쓰이는 고유 이름이에요(영문/숫자 추천). 전투 중인 러너의 ID는 바꾸지 마세요.',
     fields: [
-      [0, 'ID'], [1, '표시 이름'], [2, '기숙사', HOUSES], [3, '패시브', ['1', '2']],
+      [0, 'ID'], [1, '표시 이름'], [2, '팀', 'team'], [3, '팀 패시브 (둘 중 하나)', 'passive'],
       [4, '현재 건강', 'num'], [10, '최대 건강', 'num'], [5, '내구도', 'num'], [6, '마법능력', 'num'],
       [7, '민첩', 'num'], [8, '기술', 'num'], [9, '행운', 'num'], [13, '역할', ROLES],
       [15, '장비 (종류마다 하나씩 · 누르면 착용/해제 · 전투 스탯에 보너스가 더해져요)', 'equip'],
@@ -68,6 +67,12 @@ const SCHEMA = {
       [10, '설명', 'wide'], [11, '전조 대사 (선택 · 라운드 시작 때 보이는 예고)', 'wide']
     ],
     blank: () => ['새 스킬', '공격', '', '0', '1.5', '', '', '', '', '1', '', '']
+  },
+  teams: {
+    title: '팀', keyCol: 1, sub: r => [r[2], r[3]].filter(Boolean).map(c => view.passives[c]?.label || c).join(' / ') || '패시브 없음',
+    help: '러너가 속하는 팀이에요. 팀마다 패시브를 두 개까지 정하고, 러너는 러너 메뉴에서 그중 하나를 고릅니다. 패시브 계산은 기존 전투 규칙 그대로예요. 러너가 남아 있는 팀은 지울 수 없어요.',
+    fields: [[1, '팀 이름'], [2, '패시브 1', 'pcode'], [3, '패시브 2', 'pcode'], [4, '설명', 'wide']],
+    blank: () => ['team' + Date.now().toString(36), '새 팀', '', '', '']
   },
   items: {
     title: '아이템', keyCol: 0, sub: r => `${r[1] || ''} · ${r[1] === '회복' ? '건강 +' + (r[2] || 0) : bonusText(r) || '보너스 없음'}`,
@@ -107,6 +112,8 @@ function squareImage(file, anchor) {
   });
 }
 const H = () => ({});
+const teamRows = () => (draft.teams || view.tables.teams || [[]]).slice(1);
+const teamName = id => (teamRows().find(t => t[0] === id) || [])[1] || '';
 const BONUS = [[3, '내구도'], [4, '마법능력'], [5, '민첩'], [6, '기술'], [7, '행운']];
 const bonusText = r => BONUS.filter(([c]) => +r[c]).map(([c, l]) => `${l} ${+r[c] > 0 ? '+' : ''}${+r[c]}`).join(', ');
 const itemRows = () => (draft.items || view.tables.items || [[]]).slice(1).filter(x => x[0]);
@@ -167,7 +174,7 @@ function draw() {
   const counts = k => Math.max(0, (view.tables[k] || []).length - 1);
   const items = [['battle', '전투 진행', view.battles.filter(b => b.active).length], ['runners', '러너', counts('runners')],
     ['creatures', '크리쳐 (보스몹)', counts('creatures')], ['boss_skills', '보스 스킬', counts('boss_skills')], ['runner_skills', '러너 스킬', counts('runner_skills')],
-    ['items', '아이템', counts('items')], ['settings', '설정', '']];
+    ['items', '아이템', counts('items')], ['teams', '팀', counts('teams')], ['settings', '설정', '']];
   const m = msg ? `<div class="msg ${msg.cls}">${esc(msg.text)}</div>` : '';
   $('root').innerHTML = `<div class="admin">
     <div class="side">${items.map(([k, l, n]) => `<button data-sec="${k}" class="${section === k ? 'on' : ''}">${l}${dirty[k] ? ' •' : ''}<span class="cnt">${n}</span></button>`).join('')}</div>
@@ -332,6 +339,17 @@ function fieldHTML(k, r, [col, label, type]) {
         ${v ? `<button type="button" class="sm ghost" data-imgclear="${col}">지우기</button>` : ''}</div>
         <input id="${id}" data-col="${col}" value="${esc(v)}" placeholder="또는 이미지 주소 붙여넣기"></div></div>`;
     return `<div class="f wide"><label>${esc(label)}</label>${input}</div>`;
+  } else if (type === 'team') {
+    const opts = [['', '(팀 없음)'], ...teamRows().map(t => [t[0], t[1]])];
+    input = `<select id="${id}" data-col="${col}">${opts.map(([val, lab]) => `<option value="${esc(val)}" ${val === v ? 'selected' : ''}>${esc(lab)}</option>`).join('')}</select>`;
+  } else if (type === 'passive') {
+    const t = teamRows().find(x => x[0] === r[2]) || [];
+    const lab = c => c ? `${view.passives[c]?.label || c} — ${view.passives[c]?.desc || ''}` : '(없음)';
+    input = `<select id="${id}" data-col="${col}">${['1', '2'].map(n => `<option value="${n}" ${n === v ? 'selected' : ''}>${n}. ${esc(lab(t[n === '1' ? 2 : 3]))}</option>`).join('')}</select>`;
+    return `<div class="f wide"><label for="${id}">${esc(label)}</label>${input}</div>`;
+  } else if (type === 'pcode') {
+    input = `<select id="${id}" data-col="${col}"><option value="">(없음)</option>${Object.entries(view.passives).map(([c, p]) => `<option value="${c}" ${c === v ? 'selected' : ''}>${esc(p.label)} — ${esc(p.desc)}</option>`).join('')}</select>`;
+    return `<div class="f wide"><label for="${id}">${esc(label)}</label>${input}</div>`;
   } else if (type === 'equip') {
     const on = new Set(String(v).split(',').map(x => x.trim()).filter(Boolean));
     const gear = itemRows().filter(x => x[1] !== '회복');

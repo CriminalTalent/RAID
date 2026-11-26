@@ -94,6 +94,7 @@ function actionHTML() {
     h += '<div class="sec">아이템</div><div class="actions items">' + me.items.map(it =>
       `<button data-skill="${esc(it.name)}" class="item ${pick.skill === it.name ? 'on' : ''}" title="${esc(it.desc)}">${esc(it.name)} <span class="tag">×${it.count}</span></button>`).join('') + '</div>';
   }
+  if (me.team) h += `<div class="sub" style="margin-top:8px">팀 ${esc(me.team.team)}${me.team.passive ? ` · 패시브 <b>${esc(me.team.passive)}</b> (${esc(me.team.desc)})` : ''}</div>`;
   if ((me.equipment || []).length) h += `<div class="sub" style="margin-top:8px">장비: ${me.equipment.map(e => `${esc(e.name)}${e.bonus ? ' (' + esc(e.bonus) + ')' : ''}`).join(' · ')}</div>`;
   const s = skillOf(pick.skill);
   if (!s) return h + '<div class="sub" style="margin-top:8px">스킬이나 아이템을 고르세요.</div>';

@@ -183,11 +183,11 @@ function bigTimer(b, skew) {
 function isAdmin() { return /(?:^|;\s*)raid_is_admin=1/.test(document.cookie); }
 
 /* 응원: 관전자가 누른 버튼 집계와 최근 기록 */
-const CHEERS = { clap: '👏 박수', fire: '🔥 힘내!', guard: '🛡️ 버텨!', star: '✨ 멋져요!', wow: '😱 조심!' };
+const CHEERS = { clap: '박수', fire: '힘내!', guard: '버텨!', star: '멋져요!', wow: '조심!' };
 function cheerFeedHTML(b, limit = 8) {
   const list = (b.cheers?.recent || []).slice(0, limit);
   const w = b.watchers || [];
-  return `<div class="cheerfeed">${list.map(c => `<div><b>${esc(c.name)}</b>${esc(c.text)}</div>`).join('') || '<div class="sub" style="border:0">아직 응원이 없어요.</div>'}</div>
+  return `<div class="cheerfeed">${list.map(c => `<div><b>${esc(c.name)}</b>${esc(CHEERS[c.kind] || c.text)}</div>`).join('') || '<div class="sub" style="border:0">아직 응원이 없어요.</div>'}</div>
     <div class="watchers">관전 중 ${w.length}명${w.length ? ' · ' + w.slice(0, 12).map(esc).join(', ') + (w.length > 12 ? ' …' : '') : ''}</div>`;
 }
 
