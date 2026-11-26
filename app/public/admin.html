@@ -148,7 +148,7 @@ function login(err) {
     try { await api('/api/login', { password: $('pw').value.trim() }); load(); }
     catch (e) { login(e.message); }
   };
-  $('go').onclick = go; $('pw').onkeydown = e => e.key === 'Enter' && go();
+  $('go').onclick = go; $('pw').onkeydown = e => { if (e.key === 'Enter') go(); };
 }
 
 function settingsHTML() {

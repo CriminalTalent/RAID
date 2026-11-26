@@ -30,7 +30,7 @@ function gate(err) {
     try { myName = (await api('/api/watch/hello', { name: $('wname').value })).name; localStorage.setItem('raidWatcherName', myName); start(); }
     catch (e) { gate(e.message); }
   };
-  $('enter').onclick = go; $('wname').onkeydown = e => e.key === 'Enter' && go();
+  $('enter').onclick = go; $('wname').onkeydown = e => { if (e.key === 'Enter') go(); };
 }
 let started = false;
 function start() {
