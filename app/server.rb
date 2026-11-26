@@ -82,7 +82,7 @@ class RaidServer
 
     case [method, path]
     when ['GET', '/api/battles']
-      return [200, 'application/json; charset=utf-8', WebState.public_battles]
+      return [200, 'application/json; charset=utf-8', @engine.mutex.synchronize { @engine.public_json }]
     when ['GET', '/api/wait']
       return json('v' => @engine.wait_change(params['v'].to_i, 20))
     when ['GET', '/api/play']
@@ -112,7 +112,7 @@ class RaidServer
       when ['GET', '/api/admin'] then nil
       when ['POST', '/api/admin/table'] then e.save_table!(d['key'].to_s, Array(d['rows']))
       when ['POST', '/api/admin/heal'] then e.heal_all!
-      when ['POST', '/api/admin/start'] then e.start_battle!(runners: d['runners'], creature_name: d['creature'].to_s, auto_mode: d['auto'])
+      when ['POST', '/api/admin/start'] then e.start_battle!(runners: d['runners'], creature_name: d['creature'].to_s, auto_mode: d['auto'], positions: d['positions'] || {})
       when ['POST', '/api/admin/boss'] then e.boss_command!(d['id'], skill: d['skill'], targets: d['targets'], cells: d['cells'])
       when ['POST', '/api/admin/auto'] then e.set_auto!(d['id'], d['on'])
       when ['POST', '/api/admin/settle'] then e.settle_now!(d['id'])

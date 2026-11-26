@@ -34,14 +34,14 @@ module SkillCatalog
     'dur_buff_area' => '사거리 안 전원 내구도 강화 (철벽)',
     'agi_buff_area' => '사거리 안 전원 민첩 + 수치 (주의분산)',
     'survive_once' => '필사즉생 (다인공격 흡수, 1회)',
-    'teleport' => '순간이동 (이름 고정)',
+    'teleport' => '1칸 이동 (가로·세로·대각선, 이름 고정)',
     'pass' => '관찰 / 턴 넘기기 (이름 고정)'
   }.freeze
 
-  FIXED = { 'teleport' => '순간이동', 'pass' => '관찰' }.freeze
+  FIXED = { 'teleport' => '이동', 'pass' => '관찰' }.freeze
   BOSS_ONLY = %w[지정공격1인 지정공격다인 범위공격 전체공격].freeze
   AREA_KINDS = %w[heal_area atk_buff_area dur_buff_area agi_buff_area].freeze
-  DEFAULT_VISIBLE = %w[공격 방어 회복 회피 순간이동 관찰].freeze
+  DEFAULT_VISIBLE = %w[공격 방어 회복 회피 이동 관찰].freeze
 
   ORIGINAL = BattleSkills::SKILLS
 
@@ -49,7 +49,7 @@ module SkillCatalog
 
   def default_rows
     rows = ORIGINAL.reject { |name, _| BOSS_ONLY.include?(name) }.map { |name, d| to_row(name, d, DEFAULT_VISIBLE.include?(name)) }
-    rows << ['순간이동', '이동', 'teleport', '제한 없음', '0', '', '', '', '', '', '', '', 'O']
+    rows << ['이동', '이동', 'teleport', '1칸', '0', '', '', '', '', '', '', '', 'O']
     rows << ['관찰', '대기', 'pass', '-', '0', '', '', '', '', '', '', '', 'O']
     [HEADER.dup] + rows
   end

@@ -66,7 +66,7 @@ const HINT = {
   none: '대상이 필요 없어요. 바로 제출하면 됩니다.',
   creature: '크리쳐가 닿는 칸 중 하나라도 파란 사거리 안이면 됩니다.',
   creature_cell: '격자에서 크리쳐 바로 옆, 직선상에 있는 도착 칸을 누르세요.',
-  cell: '격자에서 이동할 빈 칸을 누르세요.',
+  cell: '격자에서 파란 칸(바로 옆 8칸) 중 하나를 누르세요.',
   runner: '대상을 고르세요.',
   runner_cell: '대상 한 명을 고르고, 격자에서 옮길 칸을 누르세요.',
   runner_skill: '대상과 초기화할 스킬을 고르세요.'
@@ -82,7 +82,7 @@ function actionHTML() {
   if (me.phase !== 'battle') return `<div class="msg info">${esc(PHASE[me.phase] || '잠시 기다려 주세요')}…</div>`;
   if (me.submitted) return `<div class="msg ok">제출 완료 · ${esc(me.submitted.type)}${me.submitted.target ? ' → ' + esc(me.submitted.target) : ''}\n다른 사람을 기다리는 중이에요.</div>`;
 
-  let h = '<div class="sec" style="margin-top:0">행동</div><div class="btns">';
+  let h = '<div class="actions">';
   me.skills.forEach(s => {
     const blocked = s.left > 0 || s.used_once;
     const note = s.used_once ? '사용함' : (s.left > 0 ? `${s.left}R` : '');
@@ -120,16 +120,27 @@ function render() {
   const occupied = new Set([...(battle.creature?.cells || []), ...(battle.runners || []).filter(r => r.hp > 0).map(r => r.pos)]);
   let pickable = null;
   if (me.active && me.phase === 'prep') pickable = p => !occupied.has(p) || p === me.my_pos;
-  if (me.active && me.phase === 'battle' && !me.submitted && s && ['cell', 'creature_cell', 'runner_cell'].includes(s.target)) pickable = p => !occupied.has(p);
+  if (me.active && me.phase === 'battle' && !me.submitted && s && ['creature_cell', 'runner_cell'].includes(s.target)) pickable = p => !occupied.has(p);
+  if (me.active && me.phase === 'battle' && !me.submitted && s && s.target === 'cell') pickable = p => !occupied.has(p) && chebyshev(myPos(), p) === 1;
 
+  const moveSet = s && s.target === 'cell' ? new Set(COLS.flatMap(x => ROWS.map(y => x + y)).filter(p => chebyshev(myPos(), p) === 1 && !occupied.has(p))) : null;
   $('root').innerHTML = `
-  <div class="layout">
-    <div class="card">${statusHTML(battle, skew)}<div id="grid">${gridHTML(battle, { me: me.me, pickable, inrange: s ? rangeSet(s) : null, picks: new Set(pick.cell ? [pick.cell] : []) })}</div>
-      <div class="units">${bossHTML(battle)}${runnersHTML(battle, me.me)}</div></div>
+  <div class="stage">
+    <div class="card"><div class="panel-h">러너 팀</div>${teamHTML(battle, me.me)}</div>
     <div>
-      <div class="card"><div class="card-h"><h2>${esc(me.display)}의 행동</h2><span class="sub">${myPos() ? '위치 ' + esc(myPos()) : ''}</span></div>
+      <div class="card center">
+        <div class="status" style="text-align:left"><span><b>${battle.phase === 'prep' ? '준비' : battle.round + '라운드'}</b> <span class="sub">${esc(battle.active ? (PHASE[battle.phase] || '') : '전투 종료')}</span></span>
+          <span class="timer">${myPos() ? '내 위치 ' + esc(myPos()) : ''}</span></div>
+        <div id="grid">${gridHTML(battle, { me: me.me, pickable, inrange: moveSet || (s ? rangeSet(s) : null), picks: new Set(pick.cell ? [pick.cell] : []) })}</div>
+        <div class="bigtimer" data-bigtimer="${esc(battle.id)}">${bigTimer(battle, skew)}</div>
+        <div class="sub">${esc(me.display)} 님${battle.phase === 'battle' ? ' · 행동 입력 마감까지' : ''}</div>
+      </div>
+      <div class="card"><div class="card-h"><h2>내 행동</h2></div>
         ${flash ? `<div class="msg ${flash.cls}">${esc(flash.text)}</div>` : ''}${actionHTML()}</div>
-      <div class="card"><div class="card-h"><h2>전투 기록</h2></div><div class="log" style="max-height:340px">${logHTML(battle, 8)}</div></div>
+    </div>
+    <div>
+      <div class="card"><div class="panel-h boss">보스</div>${bossCardHTML(battle)}</div>
+      <div class="card"><div class="card-h"><h2>전투 기록</h2></div><div class="log" style="max-height:380px">${logHTML(battle, 8)}</div></div>
     </div>
   </div>`;
 

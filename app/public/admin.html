@@ -18,7 +18,14 @@ let section = 'battle';
 let sel = {};                         // 표마다 고른 줄 번호
 let draft = {};                       // 표마다 편집 중인 사본 (저장 전)
 let dirty = {};
-const form = { runners: new Set(), creature: '', auto: false };
+const form = { slots: [], creature: '', auto: false, positions: {}, placing: null };
+function cellsOf(pos, size) {
+  const p = parsePos(pos); if (!p) return [];
+  const m = /(\d+)\s*x\s*(\d+)/i.exec(size || '1x1') || [0, 1, 1];
+  const out = [];
+  for (let dy = 0; dy < +m[2]; dy++) for (let dx = 0; dx < +m[1]; dx++) { const x = p[0] + dx, y = p[1] + dy; if (x < 7 && y < 8) out.push(COLS[x] + (y + 1)); }
+  return out;
+}
 const bossPick = {};
 const focusBattle = decodeURIComponent(location.hash.slice(1));
 
@@ -27,25 +34,27 @@ const HOUSES = ['', '그리핀도르', '슬리데린', '래번클로', '후플�
 const FACING = ['하', '상', '좌', '우'];
 const SCHEMA = {
   runners: {
-    title: '러너', keyCol: 0, sub: r => `${r[1] || ''} · ${r[2] || '기숙사 없음'}`,
+    title: '러너', keyCol: 0, sub: r => `${r[1] || ''} · ${r[13] || '역할 없음'} · HP ${r[10] || r[4] || '-'}`,
     help: 'ID는 참여 링크와 기록에 쓰이는 고유 이름이에요(영문/숫자 추천). 전투 중인 러너의 ID는 바꾸지 마세요.',
     fields: [
       [0, 'ID'], [1, '표시 이름'], [2, '기숙사', HOUSES], [3, '패시브', ['1', '2']],
       [4, '현재 건강', 'num'], [10, '최대 건강', 'num'], [5, '내구도', 'num'], [6, '마법능력', 'num'],
-      [7, '민첩', 'num'], [8, '기술', 'num'], [9, '행운', 'num'], [12, '방향', FACING]
+      [7, '민첩', 'num'], [8, '기술', 'num'], [9, '행운', 'num'], [13, '역할', ['', '탱커', '딜러', '힐러']],
+      [14, '이미지 주소 (선택)', 'wide']
     ],
-    blank: () => ['', '', '', '1', '50', '10', '10', '10', '10', '10', '50', '', '하']
+    blank: () => ['', '', '', '1', '50', '10', '10', '10', '10', '10', '50', '', '하', '딜러', '']
   },
   creatures: {
     title: '크리쳐 (보스몹)', keyCol: 1, sub: r => `HP ${r[5] || '-'} · ${r[2] || 'D4'} · ${r[3] || '1x1'}`,
-    help: '위치는 머리 칸(A1~G8), 크기 2x2면 머리 칸에서 오른쪽·아래로 넓어져요. 고정 스킬을 고르면 자동 행동에서도 그 스킬만 씁니다.',
+    help: '보스몹의 이름·스탯·머리 방향·쓰는 스킬을 정해요. 위치는 머리 칸(A1~G8), 크기 2x2면 머리 칸에서 오른쪽·아래로 넓어져요. 자동 행동은 "쓰는 스킬" 중에서 쿨타임이 돌아온 것, 직전과 다른 것을 고릅니다.',
     fields: [
       [1, '이름'], [2, '위치 (머리 칸)'], [3, '크기', ['1x1', '2x1', '1x2', '2x2', '3x2', '2x3', '3x3']], [15, '방향', FACING],
       [5, '건강', 'num'], [6, '내구도', 'num'], [7, '마법능력', 'num'], [8, '민첩', 'num'],
       [9, '기술', 'num'], [10, '행운', 'num'], [13, '명중 기본 (빈칸=60)', 'num'], [14, '회피 기본', 'num'],
-      [4, '고정 스킬', 'bossskill'], [11, '메모', 'wide']
+      [4, '고정 스킬 (선택)', 'bossskill'], [16, '이 보스가 쓰는 스킬 (누르면 넣기/빼기 · 아무것도 안 고르면 전체)', 'skilllist'],
+      [11, '메모', 'wide'], [17, '이미지 주소 (선택)', 'wide']
     ],
-    blank: () => ['', '새 크리쳐', 'D4', '1x1', '', '200', '10', '15', '5', '5', '5', '', '0', '', '', '하']
+    blank: () => ['', '새 크리쳐', 'D4', '1x1', '', '200', '10', '15', '5', '5', '5', '', '0', '', '', '하', '', '']
   },
   boss_skills: {
     title: '보스 스킬', keyCol: 0, sub: r => `${r[1] || '공격'} · ${r[2] || (r[9] ? '대상 ' + r[9] + '명' : '무작위 1명')}`,
@@ -53,7 +62,7 @@ const SCHEMA = {
     fields: [
       [0, '스킬명'], [1, '분류', ['공격', '디버프']], [2, '범위 (전체 / 칸 목록 / 빈칸)'], [9, '대상 수', 'num'],
       [4, '배율'], [6, '피해 공식 (예: 고정 20, 마법×1.5)'], [5, '디버프', ['', '독', '둔화', '약화', '취약', '기절', '반격']], [3, '쿨타임', 'num'],
-      [10, '설명', 'wide'], [11, '전조 (라운드 시작 때 보이는 예고)', 'wide']
+      [10, '설명', 'wide'], [11, '전조 대사 (선택 · 라운드 시작 때 보이는 예고)', 'wide']
     ],
     blank: () => ['새 스킬', '공격', '', '0', '1.5', '', '', '', '', '1', '', '']
   },
@@ -62,7 +71,7 @@ const SCHEMA = {
     help: '계산은 "효과"로 정해져요. 이름을 바꾸거나, 같은 효과로 배율·사거리만 다른 새 스킬을 만들어도 기존 규칙대로 계산됩니다. 사거리: 자신 / 근접(대각선 포함 1칸) / 숫자(가로+세로 칸 수).',
     fields: [
       [0, '이름'], [2, '효과', 'kind'], [1, '분류', ['공격', '방어', '지원', '이동', '대기']], [3, '사거리', ['자신', '근접', '1', '2', '3', '4', '5', '-', '제한 없음']],
-      [4, '쿨타임', 'num'], [6, '배율'], [8, '비율'], [9, '수치'],
+      [4, '쿨타임', 'num'], [6, '배율 (공격)'], [8, '비율 (회복·방어)'], [9, '수치 (보호막·민첩 등)'],
       [11, '최대 대상 수', 'num'], [10, '지속 턴', 'num'], [7, '장거리 배율 (습격)'], [5, '전투 중 1회', 'check'], [12, '참여자 화면에 보이기', 'check']
     ],
     blank: () => ['새 스킬', '공격', 'attack', '2', '1', '', '1.0', '', '', '', '', '', 'O']
@@ -115,14 +124,32 @@ function render() {
 function battleHTML() {
   const busy = new Set(view.battles.filter(b => b.active).flatMap(b => b.runners));
   const names = view.tables.runners.slice(1);
+  const roster = view.tables.runners.slice(1);
+  const rowOf = id => roster.find(r => r[0] === id) || [];
+  form.slots = form.slots.filter(id => roster.some(r => r[0] === id) && !busy.has(id));
+  if (!form.creature || !view.creature_names.includes(form.creature)) form.creature = view.creature_names[0] || '';
+  const free = id => !busy.has(id) && !form.slots.includes(id);
+  const slotHTML = (id, i) => `<div class="slot ${form.placing === id ? 'on' : ''}">
+      <select data-slot="${i}">${roster.filter(r => r[0] === id || free(r[0])).map(r => `<option value="${esc(r[0])}" ${r[0] === id ? 'selected' : ''}>${esc(r[1] || r[0])} · ${esc(r[13] || '역할 없음')}</option>`).join('')}</select>
+      <button class="sm ${form.placing === id ? 'on' : ''}" data-place="${esc(id)}">${form.positions[id] ? '위치 ' + esc(form.positions[id]) : '위치 지정'}</button>
+      <button class="sm ghost" data-unslot="${i}" title="빼기">✕</button></div>`;
+  const crow = view.tables.creatures.slice(1).find(r => r[1] === form.creature) || [];
+  const fake = { creature: { name: crow[1], pos: (crow[2] || 'D4').toUpperCase(), facing: crow[15], cells: cellsOf(crow[2] || 'D4', crow[3] || '1x1') },
+    runners: form.slots.filter(id => form.positions[id]).map(id => ({ name: id, display: rowOf(id)[1] || id, role: rowOf(id)[13], hp: 1, pos: form.positions[id] })) };
   let h = `<div class="card"><div class="card-h"><h2>새 전투</h2><button class="sm" id="heal">러너 전원 체력 회복</button></div>
-    <div class="sec" style="margin-top:0">참여자</div>
-    <div class="btns">${names.map(r => { const id = r[0], b = busy.has(id);
-      return `<label class="chk tag" style="height:26px;padding:0 8px;font-size:12px"><input type="checkbox" name="runner" value="${esc(id)}" ${b ? 'disabled' : ''} ${form.runners.has(id) && !b ? 'checked' : ''}>${esc(r[1] || id)}${b ? ' · 전투 중' : ''}</label>`; }).join('') || '<span class="sub">러너 메뉴에서 먼저 추가하세요.</span>'}</div>
-    <div class="sec">상대</div>
-    <div class="btns" style="flex-wrap:nowrap"><select id="creature" style="max-width:220px">${view.creature_names.map(n => `<option ${form.creature === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
-      <label class="chk" style="white-space:nowrap"><input type="checkbox" id="auto" ${form.auto ? 'checked' : ''}>보스 자동 행동</label>
-      <button class="primary" id="start">전투 시작</button></div></div>`;
+    <div class="bt">
+      <div>
+        <div class="sec" style="margin-top:0">상대 보스몹</div>
+        <div class="btns" style="flex-wrap:nowrap"><select id="creature">${view.creature_names.map(n => `<option ${form.creature === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+          <label class="chk" style="white-space:nowrap"><input type="checkbox" id="auto" ${form.auto ? 'checked' : ''}>보스 자동 행동</label></div>
+        <div class="sec">참여자 (저장된 러너 중에서 고르기)</div>
+        ${form.slots.map(slotHTML).join('') || '<div class="sub" style="margin-bottom:6px">아래 버튼으로 참여자를 넣으세요.</div>'}
+        <div class="btns"><button class="sm" id="addslot" ${roster.some(r => free(r[0])) ? '' : 'disabled'}>+ 참여자 추가</button>
+          <button class="primary" id="start" ${form.slots.length ? '' : 'disabled'}>전투 시작</button></div>
+        <p class="sub" style="margin-top:8px">시작 위치: 참여자의 "위치 지정"을 누르고 오른쪽 격자를 클릭하세요. 정하지 않은 사람은 전투 시작 후 각자 고릅니다.</p>
+      </div>
+      <div class="center" id="placegrid">${gridHTML(fake, { pickable: form.placing ? (p => !fake.creature.cells.includes(p)) : null })}</div>
+    </div></div>`;
   const list = view.battles.slice().reverse();
   if (focusBattle) list.sort((a, b) => (b.id === focusBattle) - (a.id === focusBattle));
   list.forEach(b => { h += battleCard(b); });
@@ -134,6 +161,7 @@ function battleCard(b) {
   const p = bossPick[b.id] || (bossPick[b.id] = { skill: '', targets: new Set(), cells: new Set() });
   const base = (shareBase || location.origin).replace(/\/+$/, '');
   const disp = id => (view.tables.runners.find(r => r[0] === id) || [])[1] || id;
+  const roleOf = id => (view.tables.runners.find(r => r[0] === id) || [])[13] || '';
   const links = Object.entries(b.tokens).map(([n, t]) => {
     const url = `${base}/play?t=${t}`;
     return `<div class="linkrow"><span>${esc(disp(n))}</span><code title="${esc(url)}">${esc(url)}</code>
@@ -143,8 +171,9 @@ function battleCard(b) {
 
   let boss = '';
   if (b.active && b.awaiting_boss) boss = `<div class="msg info" style="margin-bottom:8px">보스 행동을 정하세요. 대상이나 칸을 안 고르면 스킬 설정대로 정해집니다.</div>
-    <div class="btns">${view.boss_skills.map(s => `<button class="sm ${p.skill === s ? 'on' : ''}" data-bskill="${b.id}|${esc(s)}">${esc(s)}</button>`).join('')}</div>
-    <div class="sec">대상 러너</div><div class="btns">${b.runners.map(r => `<button class="sm ${p.targets.has(r) ? 'on' : ''}" data-btarget="${b.id}|${esc(r)}">${esc(disp(r))}</button>`).join('')}</div>
+    <div class="btns">${(b.boss_skills || view.boss_skills).map(s => `<button class="sm ${p.skill === s ? 'on' : ''}" data-bskill="${b.id}|${esc(s)}">${esc(s)}</button>`).join('')}</div>
+    <div class="sec">대상 러너</div><div class="btns">${b.runners.map(r => `<button class="sm ${p.targets.has(r) ? 'on' : ''}" data-btarget="${b.id}|${esc(r)}">${esc(disp(r))}${roleOf(r) ? ' · ' + esc(roleOf(r)) : ''}</button>`).join('')}
+      <button class="sm ghost" data-btank="${b.id}">탱커 전원</button></div>
     <div class="sub" style="margin:6px 0">범위 칸: 격자를 누르세요 · ${[...p.cells].join(', ') || '없음'}</div>
     <div class="btns"><button class="primary sm" data-bgo="${b.id}" ${p.skill ? '' : 'disabled'}>보스 행동 확정</button><button class="sm ghost" data-bclear="${b.id}">지우기</button></div>`;
 
@@ -165,10 +194,29 @@ function battleCard(b) {
 }
 
 function bindBattle() {
-  document.querySelectorAll('input[name=runner]').forEach(i => i.onchange = () => { i.checked ? form.runners.add(i.value) : form.runners.delete(i.value); });
-  if ($('creature')) { $('creature').onchange = () => form.creature = $('creature').value; $('auto').onchange = () => form.auto = $('auto').checked; }
+  $('creature').onchange = () => { form.creature = $('creature').value; form.positions = {}; render(); };
+  $('auto').onchange = () => form.auto = $('auto').checked;
+  document.querySelectorAll('[data-slot]').forEach(sel_ => sel_.onchange = () => {
+    const i = +sel_.dataset.slot, old = form.slots[i]; form.slots[i] = sel_.value;
+    if (form.positions[old]) { form.positions[sel_.value] = form.positions[old]; delete form.positions[old]; }
+    render();
+  });
+  document.querySelectorAll('[data-unslot]').forEach(b => b.onclick = () => { const id = form.slots.splice(+b.dataset.unslot, 1)[0]; delete form.positions[id]; render(); });
+  document.querySelectorAll('[data-place]').forEach(b => b.onclick = () => { form.placing = form.placing === b.dataset.place ? null : b.dataset.place; render(); });
+  $('addslot').onclick = () => {
+    const busy = new Set(view.battles.filter(x => x.active).flatMap(x => x.runners));
+    const next = view.tables.runners.slice(1).map(r => r[0]).find(id => !busy.has(id) && !form.slots.includes(id));
+    if (next) { form.slots.push(next); render(); }
+  };
+  bindGrid($('placegrid'), pos => {
+    const id = form.placing; if (!id) return;
+    Object.keys(form.positions).forEach(k => { if (form.positions[k] === pos) delete form.positions[k]; });
+    form.positions[id] = pos;
+    const nextId = form.slots.find(x => !form.positions[x]); form.placing = nextId || null; render();
+  });
   $('start').onclick = async () => {
-    if (await act('/api/admin/start', { runners: [...form.runners], creature: $('creature').value, auto: $('auto').checked }, '전투를 시작했습니다. 참여자 링크를 보내 주세요.')) form.runners.clear();
+    const ok = await act('/api/admin/start', { runners: form.slots, creature: form.creature, auto: form.auto, positions: form.positions }, '전투를 시작했습니다. 참여자 링크를 보내 주세요.');
+    if (ok) { form.slots = []; form.positions = {}; form.placing = null; render(); }
   };
   $('heal').onclick = () => act('/api/admin/heal', {}, '러너 전원의 체력을 최대로 채웠습니다.');
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
@@ -179,6 +227,10 @@ function bindBattle() {
   });
   document.querySelectorAll('[data-bskill]').forEach(b => b.onclick = () => { const [id, s] = b.dataset.bskill.split('|'); bossPick[id].skill = s; render(); });
   document.querySelectorAll('[data-btarget]').forEach(b => b.onclick = () => { const [id, r] = b.dataset.btarget.split('|'); const t = bossPick[id].targets; t.has(r) ? t.delete(r) : t.add(r); render(); });
+  document.querySelectorAll('[data-btank]').forEach(b => b.onclick = () => {
+    const id = b.dataset.btank, bt = view.battles.find(x => x.id === id);
+    bossPick[id].targets = new Set(bt.runners.filter(r => (view.tables.runners.find(x => x[0] === r) || [])[13] === '탱커')); render();
+  });
   document.querySelectorAll('[data-bclear]').forEach(b => b.onclick = () => { delete bossPick[b.dataset.bclear]; render(); });
   document.querySelectorAll('[data-bgo]').forEach(b => b.onclick = () => {
     const id = b.dataset.bgo, p = bossPick[id]; delete bossPick[id];
@@ -210,6 +262,11 @@ function fieldHTML(k, r, [col, label, type]) {
     input = `<select id="${id}" data-col="${col}" ${fixed ? 'disabled' : ''}>${Object.entries(view.kinds).filter(([kk]) => fixed || !FIXED_KINDS.includes(kk)).map(([kk, d]) => `<option value="${kk}" ${kk === v ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select>`;
   } else if (type === 'bossskill') {
     input = `<select id="${id}" data-col="${col}"><option value="">(없음 · 매 라운드 지정)</option>${view.boss_skills.map(s => `<option ${s === v ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>`;
+  } else if (type === 'skilllist') {
+    const on = new Set(String(v).split(',').map(x => x.trim()).filter(Boolean));
+    const all = (draft.boss_skills || view.tables.boss_skills).slice(1).map(x => x[0]).filter(Boolean);
+    input = `<div class="chips">${all.map(n => `<button type="button" class="sm ${on.has(n) ? 'on' : ''}" data-chip="${col}" data-val="${esc(n)}">${on.has(n) ? '✓ ' : '+ '}${esc(n)}</button>`).join('')}</div>`;
+    return `<div class="f wide"><label>${esc(label)}</label>${input}</div>`;
   } else if (type === 'check') {
     input = `<label class="chk" style="height:30px"><input type="checkbox" data-col="${col}" ${['O', 'o', 'TRUE', 'true', '1'].includes(v) ? 'checked' : ''}> 예</label>`;
   } else {
@@ -253,6 +310,12 @@ function bindEditor(k) {
       if (btn && col === S.keyCol) btn.firstElementChild.firstChild.textContent = r[col] || '(이름 없음)';
     };
     inp.oninput = upd; inp.onchange = () => { upd(); if (inp.tagName === 'SELECT' || inp.type === 'checkbox') render(); };
+  });
+  document.querySelectorAll('[data-chip]').forEach(b => b.onclick = () => {
+    const r = rows[sel[k] + 1], col = +b.dataset.chip, n = b.dataset.val;
+    const set = new Set(String(r[col] || '').split(',').map(x => x.trim()).filter(Boolean));
+    set.has(n) ? set.delete(n) : set.add(n);
+    r[col] = [...set].join(','); mark(); render();
   });
   $('add').onclick = () => { rows.push(S.blank()); sel[k] = rows.length - 2; mark(); render(); };
   if ($('dup')) $('dup').onclick = () => { const c = [...rows[sel[k] + 1]]; c[S.keyCol] += ' 복사'; rows.splice(sel[k] + 2, 0, c); sel[k]++; mark(); render(); };

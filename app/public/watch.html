@@ -32,10 +32,19 @@ function render() {
 
   const b = list.find(x => x.id === selected);
   $('root').innerHTML = `
-  <div class="layout three">
-    <div class="card">${statusHTML(b, skew)}${gridHTML(b)}<div class="units">${bossHTML(b)}</div></div>
-    <div class="card"><div class="card-h"><h2>전투 기록</h2><span class="sub">최신이 위</span></div><div class="log">${logHTML(b)}</div></div>
-    <div class="card"><div class="card-h"><h2>러너</h2><span class="sub">${(b.runners || []).length}명</span></div><div class="units" style="margin:0">${runnersHTML(b)}</div></div>
+  <div class="stage">
+    <div class="card"><div class="panel-h">러너 팀 · ${(b.runners || []).length}명</div>${teamHTML(b)}</div>
+    <div class="card center">
+      <div class="status" style="text-align:left"><span><b>${b.phase === 'prep' ? '준비' : b.round + '라운드'}</b> <span class="sub">${esc(b.active ? (PHASE[b.phase] || '') : '전투 종료')}</span></span>
+        <span class="timer">${b.phase === 'battle' ? `제출 ${(b.submitted || []).length}/${b.required}` : ''}</span></div>
+      ${gridHTML(b)}
+      <div class="bigtimer" data-bigtimer="${esc(b.id)}">${bigTimer(b, skew)}</div>
+      <div class="sub">${b.active ? (b.phase === 'battle' ? '행동 입력 마감까지' : b.phase === 'prep' ? '시작 위치 입력 마감까지' : esc(PHASE[b.phase] || '')) : '전투가 끝났습니다'}</div>
+    </div>
+    <div>
+      <div class="card"><div class="panel-h boss">보스</div>${bossCardHTML(b)}</div>
+      <div class="card"><div class="card-h"><h2>전투 기록</h2><span class="sub">최신이 위</span></div><div class="log" style="max-height:460px">${logHTML(b)}</div></div>
+    </div>
   </div>`;
 }
 live(load);

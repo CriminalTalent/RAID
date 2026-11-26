@@ -43,6 +43,29 @@ MAIN_FUNCTIONS = %w[
 ].freeze
 
 def load_main_functions!
+
+# 보스 자동 행동: 그 보스에 지정된 스킬 중에서, 쿨타임이 돌아온 것, 직전 라운드와 다른 것을 무작위로 고른다.
+# (선택지가 하나뿐이면 연속 사용 허용 — 확정 사양 "자동모드 연속 스킬 금지")
+def select_auto_skill(creature, creature_sheet, ctx = nil)
+  return nil unless creature && creature_sheet
+  rows = boss_skill_rows(creature_sheet)
+  all = rows.map { |r| [r[0].to_s.strip, r[3].to_s.strip.to_i] }.reject { |n, _| n.empty? }
+  allowed = $raid_engine ? $raid_engine.boss_skill_list(creature[:name]) : []
+  all = all.select { |n, _| allowed.include?(n) } if allowed.any?
+  return nil if all.empty?
+  pool = all
+  if ctx.is_a?(Hash)
+    cds = (ctx[:cooldowns] ||= Hash.new { |h, k| h[k] = {} })[CREATURE_COOLDOWN_KEY]
+    ready = all.reject { |n, _| cds[n].to_i > 0 }
+    pool = ready unless ready.empty?
+    fresh = pool.reject { |n, _| n == ctx[:prev_boss_skill].to_s }
+    pool = fresh unless fresh.empty?
+  end
+  pool.sample.first
+rescue => e
+  puts "[select_auto_skill 오류] #{e.class}: #{e.message}"
+  nil
+end
   src = File.read(File.join(BATTLE_DIR, 'main.rb'), encoding: 'UTF-8')
   lines = src.lines
   MAIN_FUNCTIONS.each do |name|
@@ -71,7 +94,7 @@ def web_log_text(text)
     next if line.match?(/DM 또는 멘션|\A형식|\A(공격|지원|방어|순간이동): \[|\A아이템 사용|\A입력 대기|초 후 다음 라운드|\A─+\z/)
     out << line
   end
-  out.join("\n").gsub(/\n{3,}/, "\n\n").strip
+  out.join("\n").gsub('순간이동', '이동').gsub(/\n{3,}/, "\n\n").strip
 end
 
 def post_session_thread(session, text, last_post_time)
@@ -128,8 +151,56 @@ class RaidEngine
       @store.book('app')['스킬'] = rows
     end
     settings.delete('skills')
+    migrate_tables!
     SkillCatalog.install!(@store.book('app')['스킬'])
     @store.save!
+    $raid_engine = self
+  end
+
+  RUNNER_HEADER = %w[ID 이름 기숙사 패시브선택 건강 내구도 마법능력 민첩 기술 행운 최대건강 스킬2 방향 역할 이미지].freeze
+  CREATURE_HEADER = %w[활성 이름 위치 크기 현재스킬 건강 내구도 마법능력 민첩 기술 행운 비고 보상크레딧 명중기본 회피기본 방향 스킬목록 이미지].freeze
+
+  # 예전 데이터 파일에 새 칸(역할/이미지/스킬목록)을 붙이고, 순간이동을 1칸 이동으로 바꾼다.
+  def migrate_tables!
+    { ['runner', '스탯'] => RUNNER_HEADER, ['creature', '스탯'] => CREATURE_HEADER }.each do |(book, tab), header|
+      rows = (@store.book(book)[tab] ||= [header.dup])
+      rows[0] = header.dup if rows[0].nil? || rows[0].size < header.size
+      rows[1..].each { |r| r.push('') while r.size < header.size }
+    end
+    (@store.book('app')['스킬'] || []).each do |r|
+      next unless r[2].to_s == 'teleport'
+      r[0] = '이동'
+      r[3] = '1칸'
+    end
+  end
+
+  def table_rows(book, tab)
+    (@store.book(book)[tab] || [])[1..].to_a
+  end
+
+  # 보스(크리쳐)에 지정된 스킬 목록. 비어 있으면 전체 보스 스킬을 쓴다.
+  def boss_skill_list(creature_name)
+    row = table_rows('creature', '스탯').find { |r| r[1].to_s.strip == creature_name.to_s.strip }
+    row.to_a[16].to_s.split(',').map(&:strip).reject(&:empty?)
+  end
+
+  # 관전/참여 화면용: 역할·이미지 같은 꾸밈 정보를 덧붙인 전투 상태
+  def public_json
+    data = JSON.parse(WebState.public_battles)
+    runners = table_rows('runner', '스탯').to_h { |r| [r[0].to_s.strip, r] }
+    creatures = table_rows('creature', '스탯').to_h { |r| [r[1].to_s.strip, r] }
+    data['battles'].each do |b|
+      b['runners'].each do |r|
+        row = runners[r['name']] || []
+        r['role'] = row[13].to_s
+        r['img'] = row[14].to_s
+        r['house'] = row[2].to_s
+      end
+      c = creatures[b.dig('creature', 'name').to_s] || []
+      b['creature']['img'] = c[17].to_s
+      b['creature']['omen'] = @sessions[b['id']]&.creature&.dig(:omen).to_s
+    end
+    JSON.generate(data)
   end
 
   # 화면들이 "바뀐 게 있나?" 를 묻는 번호. 무언가 바뀔 때마다 1씩 오른다.
@@ -215,7 +286,7 @@ class RaidEngine
   end
 
   # ── 전투 시작/종료 ──────────────────────────────────────────
-  def start_battle!(runners:, creature_name:, auto_mode: false)
+  def start_battle!(runners:, creature_name:, auto_mode: false, positions: {})
     runners = Array(runners).map { |r| r.to_s.strip }.reject(&:empty?).uniq
     raise '참여자를 한 명 이상 고르세요.' if runners.empty?
     busy = runners.select { |r| @sessions.values.any? { |s| s.active && s.includes_runner?(r) } }
@@ -233,6 +304,15 @@ class RaidEngine
     tokens = runners.to_h { |r| [r, SecureRandom.urlsafe_base64(9)] }
     tokens.each { |r, t| @tokens[t] = [session.id, r] }
     session.instance_variable_set(:@web_tokens, tokens)
+    # 관리자가 정해 준 시작 위치 (안 정한 사람은 준비 라운드에서 직접 고름)
+    taken = BattleGrid.creature_cells(creature)
+    positions.to_h.each do |name, pos|
+      pos = pos.to_s.strip.upcase
+      next unless runners.include?(name.to_s) && BattleGrid.valid_pos?(pos)
+      raise "#{pos}는 크리쳐가 있거나 이미 다른 러너가 고른 칸입니다." if taken.include?(pos)
+      taken << pos
+      (session.passive_ctx[:positions] ||= {})[name.to_s] = pos
+    end
     sheet_log(@creature_sheet, session.id, session.round, '전투 시작', "참여자: #{runners.join(', ')} / 상대: #{creature[:name]}")
     tick!
     session
@@ -317,9 +397,14 @@ class RaidEngine
     @listener.clear(name)
     case s.phase
     when :prep
+      if (m = command.to_s.match(/\[([A-Ga-g][1-8])\]/))
+        other = s.passive_ctx[:positions].to_h.find { |n, p| n != name && p.to_s.upcase == m[1].upcase }
+        raise "#{m[1].upcase}에는 이미 다른 러너가 있습니다." if other
+      end
       handle_prep_input(s, name, command, Set.new, SecureRandom.hex(4), @listener)
     when :battle
       raise '이미 이번 라운드 행동을 제출했습니다.' if s.processed_messages[name]
+      command = convert_move!(s, name, command)
       process_action_for_session(s, name, command, Set.new, SecureRandom.hex(4), @runner_sheet, @runner_sheet, @listener)
     else
       raise '지금은 행동을 입력하는 단계가 아닙니다.'
@@ -327,6 +412,19 @@ class RaidEngine
     notice = @listener.notice_for(name)
     tick!
     notice
+  end
+
+  # [이동/C3] → 가로·세로·대각선 1칸만 허용한 뒤, 기존 규칙의 [순간이동/C3] 으로 넘긴다.
+  def convert_move!(s, name, command)
+    m = command.to_s.match(/\[이동\/([A-Ga-g][1-8])\]/)
+    return command unless m
+    to = m[1].upcase
+    from = s.passive_ctx[:positions].to_h[name].to_s
+    state = merge_runner_state(@runner_sheet, @runner_sheet, s.runner_names, 'D3')
+    state.each { |r| p = s.passive_ctx[:positions].to_h[r[:name].to_s]; r[:pos] = p if p }
+    ok, msg = BattleGrid.movable?(from, to, state, s.creature, actor_name: name, teleport: false)
+    raise msg unless ok
+    "[순간이동/#{to}]"
   end
 
   def player_view(token)
@@ -343,7 +441,7 @@ class RaidEngine
       'active' => s.active,
       'round' => s.round,
       'my_pos' => ctx[:positions].to_h[name],
-      'submitted' => s.actions[name] ? { 'type' => s.actions[name][:type], 'target' => s.actions[name][:target] } : nil,
+      'submitted' => s.actions[name] ? { 'type' => s.actions[name][:type].to_s.sub('순간이동', '이동'), 'target' => s.actions[name][:target] } : nil,
       'prep_done' => s.phase == :prep && ctx[:positions].to_h[name].to_s != '',
       'notice' => @listener.notice_for(name),
       'skills' => skills.map do |item|
@@ -354,7 +452,7 @@ class RaidEngine
           'name' => sk,
           'kind' => kind,
           'category' => kind == 'teleport' ? '이동' : (kind == 'pass' ? '대기' : d[:category]),
-          'range' => kind == 'teleport' ? '제한 없음' : d[:range].to_s,
+          'range' => kind == 'teleport' ? '1칸 (8방향)' : d[:range].to_s,
           'cooldown' => d[:once] ? '1회' : d[:cooldown].to_i,
           'max_targets' => [d[:max_targets].to_i, 1].max,
           'desc' => SkillCatalog::KINDS[kind].to_s,
@@ -404,7 +502,7 @@ class RaidEngine
         end
       end
       WebState.sync_sessions(@sessions)
-      snap = WebState.public_battles
+      snap = public_json
       key = snap.gsub(/"(now|updated_at)":\d+,?/, '')
       if key != @last_snapshot
         @last_snapshot = key
@@ -432,9 +530,10 @@ class RaidEngine
             'round' => s.round,
             'auto' => s.auto_mode ? true : false,
             'awaiting_boss' => s.awaiting_boss ? true : false,
+            'boss_skills' => boss_skill_list(s.creature[:name]).then { |l| l.empty? ? boss_skill_names : l },
             'creature' => s.creature[:name],
             'runners' => s.runner_names,
-            'actions' => s.actions.transform_values { |a| "#{a[:type]}#{a[:target].to_s.empty? ? '' : '/' + a[:target].to_s}" },
+            'actions' => s.actions.transform_values { |a| "#{a[:type].to_s.sub('순간이동', '이동')}#{a[:target].to_s.empty? ? '' : '/' + a[:target].to_s}" },
             'tokens' => s.instance_variable_get(:@web_tokens) || {}
           }
         end

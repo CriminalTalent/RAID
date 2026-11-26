@@ -9,6 +9,19 @@ const pct = (hp, max) => Math.max(0, Math.min(100, Math.round(hp / Math.max(max,
 const short = s => [...String(s)].slice(0, 2).join('');
 const $ = id => document.getElementById(id);
 
+/* 라이트/다크 모드 (처음엔 컴퓨터 설정을 따름, 버튼으로 바꾸면 기억) */
+(function () {
+  const saved = localStorage.getItem('raidTheme');
+  const sys = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  document.documentElement.dataset.theme = saved || sys;
+})();
+function toggleTheme() {
+  const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = t; localStorage.setItem('raidTheme', t);
+  const b = $('themebtn'); if (b) b.textContent = t === 'light' ? '☾' : '☀';
+}
+addEventListener('storage', e => { if (e.key === 'raidTheme' && e.newValue) document.documentElement.dataset.theme = e.newValue; });
+
 /* 공통 상단 메뉴 */
 function navBar(active, extra = '') {
   const items = [['/', '로비', 'lobby'], ['/watch', '관전', 'watch'], ['/admin', '관리자', 'admin']];
@@ -16,8 +29,10 @@ function navBar(active, extra = '') {
   el.className = 'nav';
   el.innerHTML = `<span class="brand">RAID</span>` +
     items.map(([href, label, key]) => `<a class="item ${active === key ? 'on' : ''}" href="${href}" ${key === 'admin' && active !== 'admin' ? 'target="raid-admin"' : ''}>${label}</a>`).join('') +
-    extra + `<span class="live"><span class="dot" id="livedot"></span><span id="livetext">연결 중</span></span>`;
+    extra + `<span class="live"><span class="dot" id="livedot"></span><span id="livetext">연결 중</span></span>` +
+    `<button class="themebtn ghost" id="themebtn" title="라이트/다크 모드">${document.documentElement.dataset.theme === 'light' ? '☾' : '☀'}</button>`;
   document.body.prepend(el);
+  $('themebtn').onclick = toggleTheme;
 }
 
 /* 다른 창에서 무언가 바뀌면 곧바로 onChange 를 부른다.
@@ -81,7 +96,7 @@ function gridHTML(b, opts = {}) {
       const cls = ['cell', bossCells.has(pos) && 'boss', skillCells.has(pos) && 'skill', opts.inrange?.has(pos) && 'inrange',
         opts.pickable?.(pos) && 'pick', opts.picks?.has(pos) && 'picked'].filter(Boolean).join(' ');
       let inner = '';
-      if (r) inner = `<div class="token ${r.name === opts.me ? 'me' : ''} ${done.has(r.name) ? 'done' : ''}" title="${esc(r.display)}">${esc(short(r.display))}</div>`;
+      if (r) inner = `<div class="token ${esc(r.role || '')} ${r.name === opts.me ? 'me' : ''} ${done.has(r.name) ? 'done' : ''}" title="${esc(r.display)}${r.role ? ' · ' + esc(r.role) : ''}">${esc(short(r.display))}</div>`;
       else if (pos === c.pos) inner = `${esc(short(c.name))}<span class="arrow">${ARROW[c.facing] || ''}</span>`;
       h += `<div class="${cls}" data-pos="${pos}" title="${pos}">${inner}</div>`;
     });
@@ -117,9 +132,10 @@ function timerText(b, skew) {
   return `${b.phase === 'battle' ? `제출 ${n}/${b.required} · ` : ''}${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
 }
 function startTimers(getBattles, getSkew) {
-  setInterval(() => document.querySelectorAll('[data-timer]').forEach(el => {
-    const b = getBattles().find(x => x.id === el.dataset.timer); el.textContent = timerText(b, getSkew());
-  }), 1000);
+  setInterval(() => {
+    document.querySelectorAll('[data-timer]').forEach(el => { const b = getBattles().find(x => x.id === el.dataset.timer); el.textContent = timerText(b, getSkew()); });
+    document.querySelectorAll('[data-bigtimer]').forEach(el => { const b = getBattles().find(x => x.id === el.dataset.bigtimer); el.textContent = bigTimer(b, getSkew()); });
+  }, 1000);
 }
 
 async function api(path, body, headers = {}) {
@@ -129,4 +145,33 @@ async function api(path, body, headers = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `오류 (${res.status})`);
   return data;
+}
+
+/* 아바타 (이미지 주소가 있으면 사진, 없으면 역할 색 동그라미) */
+function avatarHTML(name, role, img, cls = '') {
+  const st = img ? ` style="background-image:url('${esc(img)}')"` : '';
+  return `<div class="av ${esc(role || '')} ${cls}"${st}>${img ? '' : esc(short(name))}</div>`;
+}
+/* 팀 패널: 러너 한 명씩 아바타·역할·체력·상태 */
+function teamHTML(b, me) {
+  const dead = new Set(b.dead || []), done = new Set(b.submitted || []);
+  return (b.runners || []).map(r => {
+    const isDead = dead.has(r.name) || r.hp <= 0;
+    const st = isDead ? '<span class="tag bad">전투불능</span>' : (b.phase === 'battle' ? (done.has(r.name) ? '<span class="tag ok">제출</span>' : '<span class="tag">대기</span>') : '');
+    return `<div class="member ${r.name === me ? 'me' : ''} ${isDead ? 'dead' : ''}">${avatarHTML(r.display, r.role, r.img)}
+      <div class="body"><div class="line1">${esc(r.display)} ${r.role ? `<span class="role ${esc(r.role)}">${esc(r.role)}</span>` : ''}<span class="hp">${r.hp}/${r.max_hp}</span></div>
+      <div class="bar"><i style="width:${pct(r.hp, r.max_hp)}%"></i></div><div class="act">${r.pos ? esc(r.pos) + ' · ' : ''}${st}</div></div></div>`;
+  }).join('') || '<div class="empty">러너 없음</div>';
+}
+function bossCardHTML(b) {
+  const c = b.creature || {};
+  return `<div class="member">${avatarHTML(c.name, '', c.img, 'lg boss')}<div class="body"><div class="line1">${esc(c.name)}<span class="hp">${c.hp}/${c.max_hp}</span></div>
+    <div class="bar boss"><i style="width:${pct(c.hp, c.max_hp)}%"></i></div>
+    <div class="act">${c.pos ? '머리 ' + esc(c.pos) + ' ' + (ARROW[c.facing] || '') + ' · ' : ''}${esc(c.size || '')}${c.skill ? ` · <span class="tag warn">${esc(c.skill)}</span>` : ''}</div></div></div>
+    ${c.omen ? `<div class="omen">⚠ ${esc(c.omen)}</div>` : ''}`;
+}
+function bigTimer(b, skew) {
+  if (!b || !b.active || (b.phase !== 'battle' && b.phase !== 'prep')) return '';
+  const left = Math.max(0, b.round_started_at + b.action_wait - (Math.floor(Date.now() / 1000) + (skew || 0)));
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
 }
