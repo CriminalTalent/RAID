@@ -159,13 +159,14 @@ function avatarHTML(name, role, img, cls = '') {
 /* 팀 패널: 러너 한 명씩 아바타·역할·체력·상태 */
 function teamHTML(b, me) {
   const dead = new Set(b.dead || []), done = new Set(b.submitted || []);
-  return (b.runners || []).map(r => {
+  const list = (b.runners || []).map(r => {
     const isDead = dead.has(r.name) || r.hp <= 0;
     const st = isDead ? '<span class="tag bad">전투불능</span>' : (b.phase === 'battle' ? (done.has(r.name) ? '<span class="tag ok">제출</span>' : '<span class="tag">대기</span>') : '');
     return `<div class="member ${r.name === me ? 'me' : ''} ${isDead ? 'dead' : ''}">${avatarHTML(r.display, r.role, r.img)}
       <div class="body"><div class="line1">${esc(r.display)} ${r.role ? `<span class="role ${esc(r.role)}">${esc(r.role)}</span>` : ''}<span class="hp">${r.hp}/${r.max_hp}</span></div>
       <div class="bar"><i style="width:${pct(r.hp, r.max_hp)}%"></i></div><div class="act">${r.pos ? esc(r.pos) + ' · ' : ''}${st}</div></div></div>`;
-  }).join('') || '<div class="empty">러너 없음</div>';
+  }).join('');
+  return list ? `<div class="teamlist">${list}</div>` : '<div class="empty">러너 없음</div>';
 }
 function bossCardHTML(b) {
   const c = b.creature || {};

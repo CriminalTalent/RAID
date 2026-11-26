@@ -355,3 +355,6 @@ input, select, textarea { border-radius: 2px; }
 .charcard .cc-stats b { font-size: 16px; }
 .chk { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 13px; cursor: pointer; }
 .chk input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+/* 참여자가 많으면 러너 팀 목록은 안에서 스크롤 */
+.teamlist { max-height: 46vh; overflow-y: auto; padding-right: 2px; }
