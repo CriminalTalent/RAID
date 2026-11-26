@@ -67,11 +67,11 @@ function draw() {
     <div class="leftcol"><div class="card"><div class="panel-h">러너 팀 · ${(b.runners || []).length}명</div>${teamHTML(b)}</div>
       <div class="card chatcard"><div class="card-h"><h2>채팅</h2><span class="sub">보기 전용</span></div>${chatHTML(b)}</div></div>
     <div class="card center">
-      <div class="status" style="text-align:left"><span><b>${b.phase === 'prep' ? '준비' : b.round + '라운드'}</b> <span class="sub">${esc(b.active ? (PHASE[b.phase] || '') : '전투 종료')}</span></span>
+      <div class="status" style="text-align:left"><span><b>${b.phase === 'lobby' ? '대기' : b.phase === 'prep' ? '준비' : b.round + '라운드'}</b> <span class="sub">${esc(b.active ? (PHASE[b.phase] || '') : '전투 종료')}</span></span>
         <span class="timer">${b.phase === 'battle' ? `제출 ${(b.submitted || []).length}/${b.required}` : ''}</span></div>
       ${gridHTML(b)}
       ${ringHTML(b, skew)}
-      <div class="sub">${b.active ? (b.phase === 'battle' ? '행동 입력 마감까지' : b.phase === 'prep' ? '시작 위치 입력 마감까지' : esc(PHASE[b.phase] || '')) : '전투가 끝났습니다'}</div>
+      <div class="sub">${b.active ? (b.phase === 'battle' ? '행동 입력 마감까지' : b.phase === 'prep' ? '시작 위치 입력 마감까지' : b.phase === 'lobby' ? '참여자들이 준비하는 중이에요' : esc(PHASE[b.phase] || '')) : '전투가 끝났습니다'}</div>
     </div>
     <div>
       <div class="card"><div class="panel-h boss">보스</div>${bossCardHTML(b)}</div>

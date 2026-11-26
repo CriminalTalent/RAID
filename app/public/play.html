@@ -94,6 +94,9 @@ function actionHTML() {
   if (!me.active) return '<div class="msg info">전투가 끝났습니다.</div>';
   const mine = (battle.runners || []).find(r => r.name === me.me);
   if (mine && mine.hp <= 0) return '<div class="msg err">전투불능 상태예요. 이번 전투는 관전만 할 수 있어요.</div>';
+  if (me.phase === 'lobby') return me.ready
+    ? `<div class="msg ok">준비 완료! 관리자가 전투를 시작하면 시작 위치를 고를 수 있어요.</div><div class="btns" style="margin-top:8px"><button class="sm ghost" id="unready">준비 취소</button></div>`
+    : `<div class="msg info">전투에 들어갈 준비가 됐으면 아래 버튼을 누르세요.</div><div class="btns" style="margin-top:8px"><button class="primary" id="ready">준비 완료</button></div>`;
   if (me.phase === 'prep') return me.prep_done
     ? `<div class="msg ok">시작 위치 ${esc(me.my_pos)} 등록 완료. 다른 칸을 누르면 바꿀 수 있어요.</div>`
     : '<div class="msg info">격자에서 시작할 빈 칸을 누르세요.</div>';
@@ -168,7 +171,7 @@ function draw() {
       <div class="card chatcard"><div class="card-h"><h2>채팅</h2><span class="sub">참여자·진행자</span></div>${chatHTML(battle, { mine: 'p:' + me.me, canSend: true })}</div></div>
     <div>
       <div class="card center">
-        <div class="status" style="text-align:left"><span><b>${battle.phase === 'prep' ? '준비' : battle.round + '라운드'}</b> <span class="sub">${esc(battle.active ? (PHASE[battle.phase] || '') : '전투 종료')}</span></span>
+        <div class="status" style="text-align:left"><span><b>${battle.phase === 'lobby' ? '대기' : battle.phase === 'prep' ? '준비' : battle.round + '라운드'}</b> <span class="sub">${esc(battle.active ? (PHASE[battle.phase] || '') : '전투 종료')}</span></span>
           <span class="timer">${myPos() ? '내 위치 ' + esc(myPos()) : ''}</span></div>
         <div id="grid">${gridHTML(battle, { me: me.me, pickable, inrange: moveSet || (s ? rangeSet(s) : null), picks: new Set(pick.cell ? [pick.cell] : []) })}</div>
         <div class="legend" id="legend">${legendHTML(s)}</div>
@@ -198,6 +201,8 @@ function draw() {
   });
   document.querySelectorAll('[data-sub]').forEach(b => b.onclick = ev => { pick.sub = b.dataset.sub; render(); askSubmit(ev); });
   if ($('go')) $('go').onclick = () => submit(command());
+  if ($('ready')) $('ready').onclick = () => api('/api/ready', { t: token, on: true }).then(load).catch(e => { flash = { cls: 'err', text: e.message }; render(); });
+  if ($('unready')) $('unready').onclick = () => api('/api/ready', { t: token, on: false }).then(load).catch(e => { flash = { cls: 'err', text: e.message }; render(); });
   if ($('cancel')) $('cancel').onclick = () => { reset(); render(); };
   bindChat((id, text) => api('/api/chat', { t: token, text }));
   // 스킬 버튼에 마우스를 올리면 사거리를 미리 보여 준다

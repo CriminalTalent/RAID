@@ -114,6 +114,9 @@ class RaidServer
       notice = @engine.mutex.synchronize { @engine.player_submit!(data['t'], data['command'].to_s) }
       @engine.bump!
       return json('ok' => notice.nil?, 'notice' => notice)
+    when ['POST', '/api/ready']
+      @engine.mutex.synchronize { @engine.player_ready!(data['t'], data['on'] != false) }
+      return json('ok' => true)
     when ['POST', '/api/chat']
       @engine.mutex.synchronize { @engine.player_chat!(data['t'], data['text']) }
       return json('ok' => true)
@@ -179,6 +182,7 @@ class RaidServer
       when ['POST', '/api/admin/boss'] then e.boss_command!(d['id'], skill: d['skill'], targets: d['targets'], cells: d['cells'])
       when ['POST', '/api/admin/auto'] then e.set_auto!(d['id'], d['on'])
       when ['POST', '/api/admin/settle'] then e.settle_now!(d['id'])
+      when ['POST', '/api/admin/begin'] then e.begin_battle!(d['id'])
       when ['POST', '/api/admin/end'] then e.end_battle!(d['id'])
       when ['POST', '/api/admin/chat'] then e.admin_chat!(d['id'], d['text'])
       when ['POST', '/api/admin/password'] then e.change_password!(d['old'], d['new'], token)
