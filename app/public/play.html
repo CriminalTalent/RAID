@@ -63,6 +63,23 @@ function command() {
   return null;
 }
 
+// 고른 행동을 사람이 읽는 문장으로: "공격 → 연습용 트롤"
+function commandText() {
+  const s = skillOf(pick.skill); if (!s) return '';
+  const nm = n => ((battle.runners || []).find(r => r.name === n) || {}).display || n;
+  const parts = [];
+  if (['creature', 'creature_cell'].includes(s.target)) parts.push(battle.creature?.name || '보스');
+  if (pick.runners.length && ['runner', 'runner_cell', 'runner_skill'].includes(s.target)) parts.push(pick.runners.map(nm).join(', '));
+  if (pick.cell && ['cell', 'creature_cell', 'runner_cell'].includes(s.target)) parts.push(pick.cell);
+  if (pick.sub && s.target === 'runner_skill') parts.push(pick.sub);
+  return s.name + (parts.length ? ' → ' + parts.join(' · ') : '');
+}
+// 행동이 다 정해지면 누른 자리 옆에 "사용하시겠습니까?" 확인창
+function askSubmit(ev) {
+  const cmd = command();
+  if (cmd && ev) confirmPop(ev, `${commandText()}, 사용하시겠습니까?`, () => submit(cmd));
+}
+
 const HINT = {
   none: '대상이 필요 없어요. 바로 제출하면 됩니다.',
   creature: '크리쳐가 닿는 칸 중 하나라도 파란 사거리 안이면 됩니다.',
@@ -170,16 +187,16 @@ function draw() {
 
   bindGrid($('grid'), (p, ev) => {
     if (me.phase === 'prep') return confirmPop(ev, `${p}, 이곳에 서겠습니까?`, () => submit(`[${p}]`));
-    pick.cell = p; flash = null; render();
+    pick.cell = p; flash = null; render(); askSubmit(ev);
   });
-  document.querySelectorAll('[data-skill]').forEach(b => b.onclick = () => { reset(); pick.skill = b.dataset.skill; flash = null; render(); });
-  document.querySelectorAll('[data-runner]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-skill]').forEach(b => b.onclick = ev => { reset(); pick.skill = b.dataset.skill; flash = null; render(); askSubmit(ev); });
+  document.querySelectorAll('[data-runner]').forEach(b => b.onclick = ev => {
     const n = b.dataset.runner, max = +b.dataset.max;
     if (pick.runners.includes(n)) pick.runners = pick.runners.filter(x => x !== n);
     else pick.runners = max > 1 ? [...pick.runners, n].slice(-max) : [n];
-    render();
+    render(); askSubmit(ev);
   });
-  document.querySelectorAll('[data-sub]').forEach(b => b.onclick = () => { pick.sub = b.dataset.sub; render(); });
+  document.querySelectorAll('[data-sub]').forEach(b => b.onclick = ev => { pick.sub = b.dataset.sub; render(); askSubmit(ev); });
   if ($('go')) $('go').onclick = () => submit(command());
   if ($('cancel')) $('cancel').onclick = () => { reset(); render(); };
   bindChat((id, text) => api('/api/chat', { t: token, text }));
