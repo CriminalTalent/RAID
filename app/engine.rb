@@ -215,6 +215,7 @@ class RaidEngine
     @cheer_last = {}
     @watchers = {}
     @chats = Hash.new { |h, k| h[k] = [] }
+    @lobby = {} # 전투 id => 준비완료 누른 러너 Set (관리자가 시작 누르기 전 대기실)
     @events = Hash.new { |h, k| h[k] = [] }
     @event_seq = 0
     @chat_last = {}
@@ -419,9 +420,13 @@ class RaidEngine
     data['battles'].each do |b|
       sess = @sessions[b['id']]
       chosen = sess ? sess.passive_ctx[:positions].to_h : {}
+      if sess && lobby?(sess.id)
+        b['phase'] = 'lobby'
+        b['ready'] = @lobby[sess.id].to_a
+      end
       b['runners'].each do |r|
         # 준비 라운드: 시작 칸을 고르기 전에는 격자에 안 보이게
-        r['pos'] = nil if sess && sess.phase == :prep && chosen[r['name']].to_s == ''
+        r['pos'] = nil if sess && (lobby?(sess.id) || sess.phase == :prep) && chosen[r['name']].to_s == ''
         row = runners[r['name']] || []
         r['role'] = row[13].to_s
         r['img'] = row[14].to_s
@@ -588,8 +593,31 @@ class RaidEngine
       (session.passive_ctx[:positions] ||= {})[name.to_s] = pos
     end
     sheet_log(@creature_sheet, session.id, session.round, '전투 시작', "참여자: #{runners.join(', ')} / 상대: #{creature[:name]}")
+    @lobby[session.id] = Set.new
     tick!
     session
+  end
+
+  def lobby?(id)
+    @lobby.key?(id.to_s)
+  end
+
+  # 러너: 링크를 열고 [준비 완료]
+  def player_ready!(token, on = true)
+    s, name = player_for(token)
+    raise '링크가 올바르지 않거나 끝난 전투입니다.' unless s && s.active
+    raise '이미 전투가 시작됐어요.' unless lobby?(s.id)
+    on ? @lobby[s.id] << name : @lobby[s.id].delete(name)
+    bump!
+  end
+
+  # 관리자: 모두 준비되면 [전투 시작] → 그때부터 시작 위치 고르기(타이머 시작)
+  def begin_battle!(id)
+    s = @sessions[id.to_s] or raise '전투를 찾지 못했습니다.'
+    raise '이미 시작한 전투입니다.' unless lobby?(s.id)
+    @lobby.delete(s.id)
+    s.start_time = Time.now
+    tick!
   end
 
   def end_battle!(session_id)
@@ -725,6 +753,7 @@ class RaidEngine
   def player_submit!(token, command)
     s, name = player_for(token)
     raise '링크가 올바르지 않거나 끝난 전투입니다.' unless s && s.active
+    raise '관리자가 전투를 시작하면 시작 위치를 고를 수 있어요.' if lobby?(s.id)
     @listener.clear(name)
     case s.phase
     when :prep
@@ -768,7 +797,8 @@ class RaidEngine
       'battle_id' => s.id,
       'me' => name,
       'display' => stat[:display_name].to_s.empty? ? name : stat[:display_name],
-      'phase' => s.phase.to_s,
+      'phase' => lobby?(s.id) ? 'lobby' : s.phase.to_s,
+      'ready' => lobby?(s.id) && @lobby[s.id].include?(name),
       'active' => s.active,
       'round' => s.round,
       'my_pos' => ctx[:positions].to_h[name],
@@ -819,6 +849,7 @@ class RaidEngine
       @sessions.each_value do |s|
         begin
           next unless s.active
+          next if lobby?(s.id)
           was_active = true
           before = { phase: s.phase, round: s.round, actions: s.actions.dup, skill: s.creature[:current_skill].to_s }
           if s.phase == :prep && !s.announced
@@ -971,7 +1002,8 @@ class RaidEngine
           {
             'id' => s.id,
             'active' => s.active,
-            'phase' => s.phase.to_s,
+            'phase' => lobby?(s.id) ? 'lobby' : s.phase.to_s,
+            'ready' => @lobby[s.id].to_a,
             'round' => s.round,
             'auto' => s.auto_mode ? true : false,
             'awaiting_boss' => s.awaiting_boss ? true : false,

@@ -2,7 +2,7 @@
 const COLS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 const ROWS = [1, 2, 3, 4, 5, 6, 7, 8];
 const ARROW = { '상': '▲', '하': '▼', '좌': '◀', '우': '▶' };
-const PHASE = { prep: '시작 위치 입력', boss_command: '보스 행동 대기', announcing: '라운드 준비', battle: '행동 입력', settling: '정산 중' };
+const PHASE = { lobby: '참여자 준비 중', prep: '시작 위치 입력', boss_command: '보스 행동 대기', announcing: '라운드 준비', battle: '행동 입력', settling: '정산 중' };
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pct = (hp, max) => Math.max(0, Math.min(100, Math.round(hp / Math.max(max, 1) * 100)));
@@ -100,7 +100,7 @@ function gridHTML(b, opts = {}) {
       let inner = '';
       const hpb = (hp, max, boss) => `<span class="hpb${boss ? ' boss' : ''}${pct(hp, max) <= 30 ? ' low' : ''}" title="${hp} / ${max}"><i style="width:${pct(hp, max)}%"></i></span>`;
       if (r) inner = hpb(r.hp, r.max_hp) + `<div class="token ${esc(r.role || '')} ${r.img ? 'pic' : ''} ${r.name === opts.me ? 'me' : ''} ${done.has(r.name) ? 'done' : ''}" title="${esc(r.display)}${r.role ? ' · ' + esc(r.role) : ''}"${r.img ? ` style="background-image:url('${esc(r.img)}')"` : ''}>${r.img ? '' : esc(short(r.display))}</div>`;
-      else if (pos === c.pos) inner = hpb(c.hp, c.max_hp, true) + `${c.img ? `<span class="bosspic" style="background-image:url('${esc(c.img)}')"></span>` : esc(short(c.name))}<span class="arrow">${ARROW[c.facing] || ''}</span>`;
+      else if (pos === c.pos) inner = hpb(c.hp, c.max_hp, true) + `${c.img ? `<span class="bosspic" style="background-image:url('${esc(c.img)}')"></span>` : esc(short(c.name))}<span class="arrow f-${esc(c.facing || '')}">${ARROW[c.facing] || ''}</span>`;
       h += `<div class="${cls}" data-pos="${pos}" title="${pos}">${inner}</div>`;
     });
   });
@@ -121,7 +121,7 @@ function runnersHTML(b, me) {
   }).join('');
 }
 function statusHTML(b, skew) {
-  return `<div class="status"><span><b>${b.phase === 'prep' ? '준비' : b.round + 'R'}</b> <span class="sub">${esc(b.active ? (PHASE[b.phase] || '') : '전투 종료')}</span></span><span class="timer" data-timer="${esc(b.id)}">${timerText(b, skew)}</span></div>`;
+  return `<div class="status"><span><b>${b.phase === 'lobby' ? '대기' : b.phase === 'prep' ? '준비' : b.round + 'R'}</b> <span class="sub">${esc(b.active ? (PHASE[b.phase] || '') : '전투 종료')}</span></span><span class="timer" data-timer="${esc(b.id)}">${timerText(b, skew)}</span></div>`;
 }
 function logHTML(b, limit = 30) {
   return (b.log || []).slice(-limit).reverse().map(l =>
