@@ -1,33 +1,57 @@
-# RAID 통합본
+# RAID 레이드 전투 웹앱
 
-전투봇(TH3V151T0R5_B)과 조사봇(TH3V151T0R5_F)을 한 저장소에 모은 통합본입니다.
-원본 두 저장소는 그대로 유지되며, 이 저장소는 레이드 웹 페이지(관리자/참여자/관전자) 작업을 이어가는 곳입니다.
+마스토돈과 구글 시트 없이, 내 컴퓨터에서 필요할 때만 켜서 쓰는 레이드 전투 웹앱입니다.
+명중·회피·크리티컬 다이스, 정산 순서, 스킬·쿨타임·기숙사 패시브는 기존 전투봇(`battle/`) 코드를 **그대로** 불러와 계산합니다.
 
-| 폴더 | 내용 | 원본 |
+| 페이지 | 주소 | 하는 일 |
 |---|---|---|
-| `battle/` | 전투봇 + 레이드 웹 페이지 | TH3V151T0R5_B `1251a4b` + 관전자 페이지 |
-| `scout/` | 조사봇 | TH3V151T0R5_F `255c1ae` |
+| 관리자 | `/admin` | 러너·크리쳐·보스 스킬 입력, 전투 시작, 보스 행동 지정, 입력 마감, 전투 종료 |
+| 참여자 | 관리자가 나눠 주는 개인 링크 | 시작 위치 고르기, 기본 스킬 버튼으로 행동 제출 |
+| 관전자 | `/watch` | 격자맵, 체력, 라운드 타이머, 전투 기록 |
 
-각 폴더는 독립적으로 실행됩니다. `.env`와 `credentials.json`은 저장소에 없으므로 기존 서버 폴더에서 복사해야 합니다.
+---
 
-## 서버 설치
-```
-cd ~
-git clone https://github.com/CriminalTalent/RAID.git
-cp ~/TH3V151T0R5_B/.env ~/TH3V151T0R5_B/credentials.json ~/RAID/battle/
-cp ~/TH3V151T0R5_F/.env ~/TH3V151T0R5_F/credentials.json ~/RAID/scout/
-cd ~/RAID/battle && bundle install
-cd ~/RAID/scout && bundle install
-```
+## 1. Ruby 설치 (처음 한 번만)
+1. https://rubyinstaller.org/downloads/ 에 들어갑니다.
+2. **WITHOUT DEVKIT** 아래 목록에서 `Ruby 3.3.x (x64)` 를 받아 설치합니다. 설치 화면은 전부 기본값으로 "Next"만 누르면 됩니다.
 
-## 실행 (기존 봇과 동시에 켜지 말 것 — 같은 계정으로 이중 응답함)
-```
-pm2 stop battle_bot scout_bot
-pm2 start ~/RAID/battle/main.rb --name raid_battle --interpreter ruby --cwd ~/RAID/battle
-pm2 start ~/RAID/scout/main.rb  --name raid_scout  --interpreter ruby --cwd ~/RAID/scout
-pm2 save
-```
-원래대로 돌아가기: `pm2 delete raid_battle raid_scout && pm2 start battle_bot scout_bot`
+## 2. 프로그램 받기
+1. https://github.com/CriminalTalent/RAID 에서 초록색 **Code** 버튼 → **Download ZIP**.
+2. 받은 ZIP 파일을 원하는 곳에 압축 풀기.
 
-## 레이드 웹 페이지
-`battle/WEB.md` 참고.
+## 3. 실행
+- 압축 푼 폴더의 **`start.bat`** 을 더블클릭합니다.
+- 검은 창에 **관리자 비밀번호**가 나오고, 잠시 뒤 관리자 페이지가 브라우저에 열립니다.
+- 끄려면 검은 창을 닫으면 됩니다. 스탯과 체력은 `app/data/raid.json` 에 저장돼서 다음에 켜도 남아 있습니다.
+  (진행 중이던 전투는 끄면 사라집니다.)
+
+## 4. 다른 사람과 같이 하기 (선택)
+내 컴퓨터에서만 보려면 이 단계는 필요 없습니다.
+1. https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe 를 받습니다.
+2. 받은 파일 이름을 **`cloudflared.exe`** 로 바꿔서 `start.bat` 과 같은 폴더에 넣습니다.
+3. `start.bat` 을 켜 둔 상태에서 **`share.bat`** 을 더블클릭합니다.
+4. 창에 나오는 `https://….trycloudflare.com` 주소를 복사해서, 관리자 페이지의 **공유 주소** 칸에 넣고 "적용".
+5. 이제 참여자 링크를 복사해 보내면 됩니다. 관전 주소는 `그 주소/watch` 입니다.
+   (공유 주소는 share.bat 을 켤 때마다 바뀝니다.)
+
+## 5. 전투 진행 순서
+1. 관리자 → 러너 스탯 / 크리쳐 스탯 / 보스 스킬 탭에서 값을 넣고 저장 (연습용 예시가 들어 있음)
+2. 전투 진행 탭 → 참여자 체크, 크리쳐 선택 → **전투 시작** → 참여자 링크 보내기
+3. 참여자: 격자에서 시작 칸 클릭 (준비 라운드)
+4. 1라운드는 기존 규칙대로 보스 전체공격 고정
+5. 매 라운드: 참여자 행동 제출 → 전원 제출 또는 5분 경과 시 자동 정산 → 관리자가 보스 행동 지정 (또는 "보스 자동 행동" 켜기)
+6. 크리쳐 격파 / 전원 전투불능 / 관리자 "전투 종료" 시 끝
+
+---
+
+## 폴더 구조
+```
+start.bat / share.bat   Windows 실행 파일
+app/                    웹앱 (엔진, 웹서버, 페이지)
+  engine.rb             battle/ 의 규칙 코드를 불러와 라운드 진행
+  local_sheet.rb        구글 시트 대신 data/raid.json 을 읽고 쓰기
+  public/               관리자·참여자 페이지
+  data/sample.json      처음 켤 때 복사되는 예시 데이터
+battle/                 기존 전투봇 (규칙 코드 원본, TH3V151T0R5_B)
+scout/                  기존 조사봇 (보관용, TH3V151T0R5_F)
+```

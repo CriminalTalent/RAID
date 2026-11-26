@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>레이드 참여</title>
+<link rel="stylesheet" href="/assets/raid.css">
+<script src="/assets/raid.js"></script>
+</head>
+<body>
+<header><h1 id="title">레이드 참여</h1><span class="muted" id="who"></span><span class="muted" style="margin-left:auto" id="conn"></span></header>
+<div class="wrap">
+  <div id="root"><div class="panel muted">불러오는 중…</div></div>
+</div>
+<script>
+const token = new URLSearchParams(location.search).get('t') || '';
+let me = null, battle = null, skew = 0;
+let chosen = null;        // 고른 스킬 이름
+let sending = false, flash = null;
+
+function skillDef(name) { return (me.skills || []).find(s => s.name === name); }
+
+// 스킬이 무엇을 대상으로 하는지 (기본 스킬 기준)
+function targetKind(s) {
+  if (s.name === '순간이동') return 'cell';
+  if (s.name === '관찰') return 'none';
+  if (s.category === '공격') return 'creature';
+  if (s.range === '자신') return 'none';
+  return 'runner';
+}
+
+function myPos() {
+  const r = (battle.runners || []).find(r => r.name === me.me);
+  return (r && r.pos) || me.my_pos;
+}
+
+function rangeSet(s) {
+  const set = new Set(), from = myPos();
+  if (!s || !from) return set;
+  COLS.forEach(x => ROWS.forEach(y => { if (inRange(from, x + y, s.range)) set.add(x + y); }));
+  return set;
+}
+
+async function load() {
+  try {
+    const [p, all] = await Promise.all([api('/api/play?t=' + encodeURIComponent(token)), api('/api/battles')]);
+    me = p;
+    battle = (all.battles || []).find(b => b.id === p.battle_id);
+    skew = all.now - Math.floor(Date.now() / 1000);
+    $('conn').textContent = '실시간 갱신 중';
+    render();
+  } catch (e) {
+    $('root').innerHTML = `<div class="panel msg err">${esc(e.message)}</div>`;
+    $('conn').textContent = '';
+  }
+}
+
+async function submit(command) {
+  if (sending) return;
+  sending = true;
+  try {
+    const r = await api('/api/play', { t: token, command });
+    flash = r.notice ? { cls: 'err', text: r.notice.text } : null;
+    if (!r.notice) chosen = null;
+  } catch (e) {
+    flash = { cls: 'err', text: e.message };
+  }
+  sending = false;
+  await load();
+}
+
+function actionPanel() {
+  if (!me.active) return '<div class="msg info">전투가 끝났습니다.</div>';
+  const alive = (battle.runners || []).find(r => r.name === me.me);
+  if (alive && alive.hp <= 0) return '<div class="msg err">전투불능 상태입니다. 관전만 할 수 있어요.</div>';
+
+  if (me.phase === 'prep') {
+    return me.prep_done
+      ? `<div class="msg ok">시작 위치 ${esc(me.my_pos)} 등록 완료. 다른 사람을 기다리는 중이에요. (다시 누르면 바꿀 수 있어요)</div>`
+      : '<div class="msg info">왼쪽 격자에서 시작할 칸을 누르세요.</div>';
+  }
+  if (me.phase !== 'battle') return `<div class="msg info">${esc(PHASE[me.phase] || '잠시 기다려 주세요')}…</div>`;
+  if (me.submitted) {
+    const t = me.submitted.target ? ' → ' + me.submitted.target : '';
+    return `<div class="msg ok">이번 라운드 행동 제출 완료: ${esc(me.submitted.type)}${esc(t)}<br>다른 사람을 기다리는 중이에요.</div>`;
+  }
+
+  let h = '<h3 style="margin-top:0">1. 행동 고르기</h3><div class="row">';
+  me.skills.forEach(s => {
+    const blocked = s.left > 0 || s.used_once;
+    const note = s.used_once ? '사용함' : (s.left > 0 ? `쿨 ${s.left}` : '');
+    h += `<button data-skill="${esc(s.name)}" class="${chosen === s.name ? 'on' : ''}" ${blocked ? 'disabled' : ''}>${esc(s.name)}${note ? `<span class="tag">${note}</span>` : ''}</button>`;
+  });
+  h += '</div>';
+  const s = chosen && skillDef(chosen);
+  if (s) {
+    const kind = targetKind(s);
+    h += `<p class="muted">${esc(s.category || '')} · 사거리 ${esc(s.range || '-')} · 쿨타임 ${esc(s.cooldown)}</p>`;
+    h += '<h3>2. 대상 고르기</h3>';
+    if (kind === 'none') {
+      h += `<button class="primary" data-cmd="[${esc(s.name)}]">${esc(s.name)} 제출</button>`;
+    } else if (kind === 'creature') {
+      const c = battle.creature || {};
+      h += `<button class="primary" data-cmd="[${esc(s.name)}/${esc(c.name)}]">${esc(c.name)}에게 ${esc(s.name)}</button>`;
+      h += '<p class="muted">파란 칸이 사거리예요. 크리쳐가 닿는 칸이 하나라도 사거리 안이면 됩니다.</p>';
+    } else if (kind === 'runner') {
+      const inr = rangeSet(s);
+      h += '<div class="row">' + (battle.runners || []).filter(r => r.hp > 0).map(r => {
+        const ok = r.name === me.me || inr.has(r.pos);
+        return `<button class="${ok ? 'primary' : ''}" data-cmd="[${esc(s.name)}/${esc(r.name)}]">${esc(r.display)}${r.name === me.me ? ' (나)' : ''}${ok ? '' : '<span class="tag">사거리 밖?</span>'}</button>`;
+      }).join('') + '</div>';
+    } else if (kind === 'cell') {
+      h += '<p class="muted">왼쪽 격자에서 이동할 칸을 누르세요.</p>';
+    }
+  }
+  return h;
+}
+
+function render() {
+  if (!battle) { $('root').innerHTML = '<div class="panel muted">전투 정보를 기다리는 중…</div>'; return; }
+  $('title').textContent = `${battle.creature?.name || ''} 레이드`;
+  $('who').textContent = `${me.display} 님`;
+
+  const s = chosen && skillDef(chosen);
+  const kind = s ? targetKind(s) : null;
+  const occupied = new Set([...(battle.creature?.cells || []), ...(battle.runners || []).filter(r => r.hp > 0).map(r => r.pos)]);
+  let pickable = null;
+  if (me.active && me.phase === 'prep') pickable = pos => !occupied.has(pos) || pos === me.my_pos;
+  if (me.active && me.phase === 'battle' && !me.submitted && kind === 'cell') pickable = pos => !occupied.has(pos);
+  const inrange = s && kind !== 'cell' && kind !== 'none' ? rangeSet(s) : null;
+
+  $('root').innerHTML = `
+  <div class="cols">
+    <section>
+      <div class="panel">
+        <div class="row" style="justify-content:space-between;margin-bottom:10px">
+          <b>${battle.phase === 'prep' ? '준비' : battle.round + '라운드'} <span class="muted">${esc(battle.active ? (PHASE[battle.phase] || '') : '전투 종료')}</span></b>
+          <span class="muted" id="timer"></span>
+        </div>
+        <div id="grid">${gridHTML(battle, { me: me.me, pickable, inrange })}</div>
+        ${unitsHTML(battle)}
+      </div>
+    </section>
+    <section>
+      <div class="panel">
+        <h2>내 행동</h2>
+        ${flash ? `<div class="msg ${flash.cls}">${esc(flash.text)}</div>` : ''}
+        ${actionPanel()}
+      </div>
+      <div class="panel"><h2>전투 기록</h2><div class="log">${logHTML(battle, 10)}</div></div>
+    </section>
+  </div>`;
+
+  bindGrid($('grid'), pos => {
+    if (me.phase === 'prep') submit(`[${pos}]`);
+    else if (chosen === '순간이동') submit(`[순간이동/${pos}]`);
+  });
+  document.querySelectorAll('[data-skill]').forEach(b => b.onclick = () => { chosen = b.dataset.skill; flash = null; render(); });
+  document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => submit(b.dataset.cmd));
+  tick();
+}
+
+function tick() { const el = $('timer'); if (el && battle) el.textContent = timerText(battle, skew); }
+
+load();
+setInterval(() => { if (!sending) load(); }, 2500);
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
