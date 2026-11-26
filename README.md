@@ -42,7 +42,8 @@
 ## 4-1. 서버에 올려서 항상 켜 두기 (선택)
 Ruby 표준 기능만 써서 따로 설치할 것이 없고, 저장소에 `Dockerfile` 과 `render.yaml` 이 들어 있습니다.
 - **Render(render.com)**: New → Blueprint → 이 저장소 선택 → `RAID_ADMIN_PASSWORD` 칸에 관리자 비밀번호 입력 → 만들기.
-  `render.yaml` 대로 Docker로 빌드되고 1GB 디스크(`/data`)에 데이터가 저장됩니다. 디스크는 유료(Starter) 플랜에서만 되고, 무료 플랜은 재시작 때마다 데이터가 처음 상태로 돌아갑니다.
+  기본은 **무료(free) 플랜**이라 돈이 들지 않지만, 서버가 재시작·재배포되면 데이터가 처음 상태로 돌아가고 15분 동안 접속이 없으면 잠들어요(다음 접속 때 1분쯤 뒤 깸).
+  데이터를 계속 남기려면 `render.yaml` 의 `plan: free` 를 `starter`(유료)로 바꾸고 `disk` 부분의 `#` 을 지우세요.
 - **Docker가 있는 서버**: `docker build -t raid .` → `docker run -d -p 80:4567 -e RAID_ADMIN_PASSWORD=비밀번호 -v raid-data:/data raid`
 - **Ruby가 있는 리눅스 서버**: `PORT=4567 RAID_DATA_DIR=/srv/raid RAID_ADMIN_PASSWORD=비밀번호 ruby app/run.rb`
 
