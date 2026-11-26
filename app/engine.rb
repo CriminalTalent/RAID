@@ -215,6 +215,7 @@ class RaidEngine
     @cheer_last = {}
     @watchers = {}
     @chats = Hash.new { |h, k| h[k] = [] }
+    @joined = Hash.new { |h, k| h[k] = Set.new } # 전투 id => 링크로 들어온 러너
     @lobby = {} # 전투 id => 준비완료 누른 러너 Set (관리자가 시작 누르기 전 대기실)
     @events = Hash.new { |h, k| h[k] = [] }
     @event_seq = 0
@@ -622,7 +623,9 @@ class RaidEngine
     s, name = player_for(token)
     raise '링크가 올바르지 않거나 끝난 전투입니다.' unless s && s.active
     raise '이미 전투가 시작됐어요.' unless lobby?(s.id)
+    was = @lobby[s.id].include?(name)
     on ? @lobby[s.id] << name : @lobby[s.id].delete(name)
+    WebState.record_post(s, "#{display_of(name)} #{on ? '준비 완료' : '준비 취소'}") if was != on
     bump!
   end
 
@@ -631,6 +634,7 @@ class RaidEngine
     s = @sessions[id.to_s] or raise '전투를 찾지 못했습니다.'
     raise '이미 시작한 전투입니다.' unless lobby?(s.id)
     @lobby.delete(s.id)
+    WebState.record_post(s, '진행자가 전투를 시작했습니다. 시작 위치를 고르세요.')
     s.start_time = Time.now
     tick!
   end
@@ -796,8 +800,28 @@ class RaidEngine
       raise '지금은 행동을 입력하는 단계가 아닙니다.'
     end
     notice = @listener.notice_for(name)
+    log_plan!(s, name, command) unless notice
     tick!
     notice
+  end
+
+  # 전투 기록: "애셔 그레이 > 심핵 공격 예정", "애셔 그레이 > 시작 위치 C3"
+  def log_plan!(s, name, command)
+    who = display_of(name)
+    if s.phase == :prep || s.passive_ctx[:positions].to_h[name] && command.to_s.match?(/\A\[[A-Ga-g][1-8]\]\z/)
+      pos = command.to_s[/[A-Ga-g][1-8]/].to_s.upcase
+      return WebState.record_post(s, "#{who} > 시작 위치 #{pos}") unless pos.empty?
+    end
+    a = s.actions[name] or return
+    type = a[:type].to_s.sub('순간이동', '이동')
+    tgt = a[:target].to_s.split(',').map(&:strip).reject(&:empty?).map { |t| s.runner_names.include?(t) ? display_of(t) : t }
+    text = if type == '이동' then "이동(#{tgt.join}) 예정"
+           elsif tgt.any? then "#{tgt.join(', ')} #{type} 예정"
+           else "#{type} 예정"
+           end
+    WebState.record_post(s, "#{who} > #{text}")
+  rescue => e
+    puts "[기록 오류] #{e.message}"
   end
 
   # [이동/C3] → 가로·세로·대각선 1칸만 허용한 뒤, 기존 규칙의 [순간이동/C3] 으로 넘긴다.
@@ -816,6 +840,11 @@ class RaidEngine
   def player_view(token)
     s, name = player_for(token)
     return nil unless s
+    if s.active && !@joined[s.id].include?(name)
+      @joined[s.id] << name
+      WebState.record_post(s, "#{display_of(name)} 입장")
+      bump!
+    end
     ctx = s.passive_ctx
     base = @runner_sheet.read_base_stats
     stat = base.find { |b| b[:name].to_s == name } || {}
