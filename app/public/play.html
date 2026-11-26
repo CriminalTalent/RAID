@@ -16,11 +16,11 @@ let me = null, battle = null, skew = 0, sending = false, flash = null;
 let pick = { skill: null, runners: [], cell: null, sub: null };
 const reset = () => { pick = { skill: null, runners: [], cell: null, sub: null }; };
 
-const skillOf = n => (me.skills || []).find(s => s.name === n);
+const skillOf = n => [...(me.skills || []), ...(me.items || [])].find(s => s.name === n);
 const myPos = () => ((battle.runners || []).find(r => r.name === me.me) || {}).pos || me.my_pos;
 function rangeSet(s) {
   const set = new Set(), from = myPos();
-  if (!s || !from || !['creature', 'creature_cell', 'runner', 'runner_cell', 'runner_skill'].includes(s.target)) return set;
+  if (!s || s.item || !from || !['creature', 'creature_cell', 'runner', 'runner_cell', 'runner_skill'].includes(s.target)) return set;
   COLS.forEach(x => ROWS.forEach(y => { if (inRange(from, x + y, s.range)) set.add(x + y); }));
   return set;
 }
@@ -89,11 +89,18 @@ function actionHTML() {
     h += `<button data-skill="${esc(s.name)}" class="${pick.skill === s.name ? 'on' : ''}" ${blocked ? 'disabled' : ''} title="${esc(s.desc)}">${esc(s.name)}${note ? ` <span class="tag">${note}</span>` : ''}</button>`;
   });
   h += '</div>';
+  if ((me.items || []).length) {
+    h += '<div class="sec">아이템</div><div class="actions">' + me.items.map(it =>
+      `<button data-skill="${esc(it.name)}" class="item ${pick.skill === it.name ? 'on' : ''}" title="${esc(it.desc)}">${esc(it.name)} <span class="tag">×${it.count}</span></button>`).join('') + '</div>';
+  }
+  if ((me.equipment || []).length) h += `<div class="sub" style="margin-top:8px">장비: ${me.equipment.map(e => `${esc(e.name)}${e.bonus ? ' (' + esc(e.bonus) + ')' : ''}`).join(' · ')}</div>`;
   const s = skillOf(pick.skill);
-  if (!s) return h + '<div class="sub" style="margin-top:8px">스킬을 고르세요.</div>';
+  if (!s) return h + '<div class="sub" style="margin-top:8px">스킬이나 아이템을 고르세요.</div>';
 
-  h += `<div class="kv" style="margin-top:10px"><span>효과</span><span>${esc(s.desc)}</span><span>사거리</span><span>${esc(s.range || '-')}</span><span>쿨타임</span><span>${esc(s.cooldown)}</span></div>`;
-  h += `<div class="sec">대상</div><div class="sub" style="margin-bottom:6px">${HINT[s.target] || ''}</div>`;
+  h += s.item
+    ? `<div class="kv" style="margin-top:10px"><span>효과</span><span>건강 +${s.value}${s.desc ? ' · ' + esc(s.desc) : ''}</span><span>사거리</span><span>제한 없음 (1명)</span><span>남은 개수</span><span>${s.count}개 (정산 때 1개 줄어요)</span></div>`
+    : `<div class="kv" style="margin-top:10px"><span>효과</span><span>${esc(s.desc)}</span><span>사거리</span><span>${esc(s.range || '-')}</span><span>쿨타임</span><span>${esc(s.cooldown)}</span></div>`;
+  h += `<div class="sec">대상</div><div class="sub" style="margin-bottom:6px">${s.item ? '회복할 사람 한 명을 고르세요.' : HINT[s.target] || ''}</div>`;
   if (['runner', 'runner_cell', 'runner_skill'].includes(s.target)) {
     const inr = rangeSet(s), max = s.target === 'runner' ? s.max_targets : 1;
     h += '<div class="btns">' + (battle.runners || []).filter(r => r.hp > 0).map(r => {
@@ -140,6 +147,7 @@ function render() {
     </div>
     <div>
       <div class="card"><div class="panel-h boss">보스</div>${bossCardHTML(battle)}</div>
+      <div class="card"><div class="card-h"><h2>응원</h2></div>${cheerFeedHTML(battle, 5)}</div>
       <div class="card"><div class="card-h"><h2>전투 기록</h2></div><div class="log" style="max-height:380px">${logHTML(battle, 8)}</div></div>
     </div>
   </div>`;

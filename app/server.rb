@@ -52,6 +52,9 @@ class RaidServer
     path, query = target.to_s.split('?', 2)
     params = URI.decode_www_form(query.to_s).to_h rescue {}
     path = path.chomp('/') if path.length > 1
+    # share.bat(클라우드플레어) 로 들어오면 실제 접속자 주소는 이 헤더에 있다
+    Thread.current[:ip] = headers['cf-connecting-ip'].to_s.empty? ? (client.peeraddr[3] rescue '?') : headers['cf-connecting-ip']
+    Thread.current[:set_cookie] = nil
 
     status, type, out = route(method, path, params, headers, body)
     respond(client, status, type, out)
@@ -93,11 +96,28 @@ class RaidServer
       notice = @engine.mutex.synchronize { @engine.player_submit!(data['t'], data['command'].to_s) }
       @engine.bump!
       return json('ok' => notice.nil?, 'notice' => notice)
+    when ['POST', '/api/watch/hello']
+      return json('name' => @engine.mutex.synchronize { @engine.watcher_hello!(data['name']) })
+    when ['POST', '/api/cheer']
+      @engine.mutex.synchronize { @engine.cheer!(data['id'], data['name'], data['kind'], Thread.current[:ip]) }
+      return json('ok' => true)
+    when ['POST', '/api/login']
+      token = @engine.mutex.synchronize { @engine.admin_login!(data['password'], Thread.current[:ip]) }
+      Thread.current[:set_cookie] = ["raid_admin=#{token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=#{RaidEngine::ADMIN_TTL}",
+                     "raid_is_admin=1; Path=/; SameSite=Strict; Max-Age=#{RaidEngine::ADMIN_TTL}"]
+      return json('ok' => true)
+    when ['POST', '/api/logout']
+      @engine.mutex.synchronize { @engine.admin_logout!(cookie(headers, 'raid_admin')) }
+      Thread.current[:set_cookie] = ['raid_admin=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0', 'raid_is_admin=; Path=/; SameSite=Strict; Max-Age=0']
+      return json('ok' => true)
     end
 
     if path.start_with?('/api/admin')
-      return json({ 'error' => '관리자 비밀번호가 틀렸습니다.' }, 401) unless headers['x-admin-key'] == @engine.admin_key
-      return admin(method, path, data)
+      unless @engine.mutex.synchronize { @engine.admin?(cookie(headers, 'raid_admin')) }
+        Thread.current[:set_cookie] = ['raid_is_admin=; Path=/; SameSite=Strict; Max-Age=0']
+        return json({ 'error' => '관리자 로그인이 필요합니다.', 'login' => true }, 401)
+      end
+      return admin(method, path, data, cookie(headers, 'raid_admin'))
     end
 
     [404, 'text/plain; charset=utf-8', 'Not Found']
@@ -105,18 +125,27 @@ class RaidServer
     json({ 'error' => e.message }, 400)
   end
 
-  def admin(method, path, d)
+  def cookie(headers, name)
+    headers['cookie'].to_s.split(';').map(&:strip).each do |kv|
+      k, v = kv.split('=', 2)
+      return v.to_s if k == name
+    end
+    ''
+  end
+
+  def admin(method, path, d, token)
     e = @engine
     e.mutex.synchronize do
       case [method, path]
       when ['GET', '/api/admin'] then nil
       when ['POST', '/api/admin/table'] then e.save_table!(d['key'].to_s, Array(d['rows']))
       when ['POST', '/api/admin/heal'] then e.heal_all!
-      when ['POST', '/api/admin/start'] then e.start_battle!(runners: d['runners'], creature_name: d['creature'].to_s, auto_mode: d['auto'], positions: d['positions'] || {})
+      when ['POST', '/api/admin/start'] then e.start_battle!(runners: d['runners'], creature_name: d['creature'].to_s, auto_mode: d['auto'], positions: d['positions'] || {}, hps: d['hps'] || {})
       when ['POST', '/api/admin/boss'] then e.boss_command!(d['id'], skill: d['skill'], targets: d['targets'], cells: d['cells'])
       when ['POST', '/api/admin/auto'] then e.set_auto!(d['id'], d['on'])
       when ['POST', '/api/admin/settle'] then e.settle_now!(d['id'])
       when ['POST', '/api/admin/end'] then e.end_battle!(d['id'])
+      when ['POST', '/api/admin/password'] then e.change_password!(d['old'], d['new'], token)
       else return [404, 'text/plain; charset=utf-8', 'Not Found']
       end
       e.bump! unless method == 'GET'
@@ -128,7 +157,8 @@ class RaidServer
     reason = { 200 => 'OK', 400 => 'Bad Request', 401 => 'Unauthorized', 404 => 'Not Found', 500 => 'Internal Server Error' }[code]
     body = body.to_s.b
     client.write("HTTP/1.1 #{code} #{reason}\r\nContent-Type: #{type}\r\nContent-Length: #{body.bytesize}\r\n" \
-                 "Cache-Control: no-store\r\nConnection: close\r\n\r\n")
+                 "Cache-Control: no-store\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n" \
+                 "#{Array(Thread.current[:set_cookie]).map { |c| "Set-Cookie: #{c}\r\n" }.join}Connection: close\r\n\r\n")
     client.write(body)
   end
 end

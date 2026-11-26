@@ -109,6 +109,22 @@ rescue => e
   puts "[기록 실패] #{e.message}"
 end
 
+# 전투 중 회복 아이템: 원래 규칙(물약 = 사거리 제한 없음, 대상 1명, 소지품 확인, 정산 뒤 차감)을
+# 그대로 쓰되, 물약 목록과 소지품을 관리자 화면의 '아이템' 표와 러너의 '소지품' 칸에서 읽는다.
+module BattleItems
+  def self.potion?(skill_name)
+    $raid_engine ? $raid_engine.heal_item?(skill_name) : false
+  end
+
+  def self.owned?(account, skill_name)
+    $raid_engine ? $raid_engine.item_count(account, skill_name).positive? : nil
+  end
+
+  def self.consume!(account, skill_name)
+    $raid_engine ? $raid_engine.consume_item!(account, skill_name) : false
+  end
+end
+
 # 마스토돈 DM 대신 참여자 화면에 안내 문구를 띄운다.
 class WebListener
   def initialize
@@ -142,7 +158,12 @@ class RaidEngine
     @last_post_time = Time.at(0)
     @version = 1
     @last_snapshot = nil
-    settings['admin_key'] ||= SecureRandom.alphanumeric(8)
+    @admin_sessions = {}
+    @login_fails = Hash.new { |h, k| h[k] = [] }
+    @cheers = Hash.new { |h, k| h[k] = { 'counts' => Hash.new(0), 'recent' => [] } }
+    @cheer_last = {}
+    @watchers = {}
+    settings['admin_key'] ||= SecureRandom.alphanumeric(10)
     unless @store.book('app')['스킬']
       rows = SkillCatalog.default_rows
       if settings['skills'].is_a?(Array)
@@ -152,12 +173,18 @@ class RaidEngine
     end
     settings.delete('skills')
     migrate_tables!
-    SkillCatalog.install!(@store.book('app')['스킬'])
-    @store.save!
     $raid_engine = self
+    install_skills!
+    add_equipment_bonus!(@runner_sheet)
+    @store.save!
   end
 
-  RUNNER_HEADER = %w[ID 이름 기숙사 패시브선택 건강 내구도 마법능력 민첩 기술 행운 최대건강 스킬2 방향 역할 이미지].freeze
+  RUNNER_HEADER = %w[ID 이름 기숙사 패시브선택 건강 내구도 마법능력 민첩 기술 행운 최대건강 스킬2 방향 역할 이미지 장비 소지품].freeze
+  ITEM_HEADER = %w[이름 종류 회복량 내구도 마법능력 민첩 기술 행운 설명].freeze
+  ITEM_TYPES = %w[회복 무기 갑옷 장신구].freeze
+  # 아이템 표의 보너스 칸 번호 → 전투 스탯 키
+  ITEM_BONUS = { 3 => :dur, 4 => :atk, 5 => :agi, 6 => :tec, 7 => :luck }.freeze
+  ROLE_RENAME = { '탱커' => '수호', '딜러' => '공격', '힐러' => '지원' }.freeze
   CREATURE_HEADER = %w[활성 이름 위치 크기 현재스킬 건강 내구도 마법능력 민첩 기술 행운 비고 보상크레딧 명중기본 회피기본 방향 스킬목록 이미지].freeze
 
   # 예전 데이터 파일에 새 칸(역할/이미지/스킬목록)을 붙이고, 순간이동을 1칸 이동으로 바꾼다.
@@ -172,6 +199,100 @@ class RaidEngine
       r[0] = '이동'
       r[3] = '1칸'
     end
+    # 역할 이름은 탱/딜/힐 대신 수호/공격/지원
+    table_rows('runner', '스탯').each { |r| r[13] = ROLE_RENAME.fetch(r[13].to_s, r[13].to_s) }
+    boss = @store.book('creature')['보스스킬'] || []
+    if boss[1..].to_a.any? { |r| r[0] == '탱커 버스터' } && boss[1..].to_a.none? { |r| r[0] == '집중 강타' }
+      boss[1..].each do |r|
+        r[0] = '집중 강타' if r[0] == '탱커 버스터'
+        r[10] = r[10].to_s.gsub('탱커가 아니면 위험', '내구도 높은 러너가 받아야 안전').gsub('탱커 대상', '한 명에게').gsub('탱커를', '앞에 선 러너를')
+      end
+      table_rows('creature', '스탯').each { |r| r[16] = r[16].to_s.sub('탱커 버스터', '집중 강타') }
+    end
+    unless @store.book('app')['아이템']
+      sample = JSON.parse(File.read(File.join(APP_DIR, 'data', 'sample.json'), encoding: 'UTF-8'))
+      @store.book('app')['아이템'] = sample.dig('books', 'app', '아이템') || [ITEM_HEADER.dup]
+    end
+  end
+
+  # ── 아이템 ────────────────────────────────────────────────
+  def item_rows
+    table_rows('app', '아이템').reject { |r| r[0].to_s.strip.empty? }
+  end
+
+  def item_row(name)
+    n = BattleItems.norm(name)
+    item_rows.find { |r| BattleItems.norm(r[0]) == n }
+  end
+
+  def heal_item?(name)
+    item_row(name).to_a[1].to_s == '회복'
+  end
+
+  def runner_row(id)
+    table_rows('runner', '스탯').find { |r| r[0].to_s.strip == id.to_s.strip }
+  end
+
+  # "회복 물약:2,고급 회복 물약:1" → { "회복 물약" => 2, ... }
+  def inventory(id)
+    runner_row(id).to_a[16].to_s.split(',').each_with_object({}) do |part, h|
+      name, cnt = part.split(':', 2).map(&:strip)
+      next if name.to_s.empty?
+      h[name] = (h[name] || 0) + (cnt.to_s.empty? ? 1 : cnt.to_i)
+    end
+  end
+
+  def item_count(id, name)
+    n = BattleItems.norm(name)
+    inventory(id).sum { |k, v| BattleItems.norm(k) == n ? v : 0 }
+  end
+
+  def consume_item!(id, name)
+    row = runner_row(id) or return false
+    inv = inventory(id)
+    key = inv.keys.find { |k| BattleItems.norm(k) == BattleItems.norm(name) && inv[k].positive? } or return false
+    inv[key] -= 1
+    row[16] = inv.reject { |_, v| v <= 0 }.map { |k, v| "#{k}:#{v}" }.join(',')
+    @store.save!
+    true
+  end
+
+  def equipment(id)
+    names = runner_row(id).to_a[15].to_s.split(',').map(&:strip)
+    names.filter_map { |n| item_row(n) }.reject { |r| r[1].to_s == '회복' }
+  end
+
+  def equipment_bonus(id)
+    equipment(id).each_with_object(Hash.new(0)) do |r, h|
+      ITEM_BONUS.each { |col, key| h[key] += r[col].to_i }
+    end
+  end
+
+  def bonus_text(row)
+    labels = { 3 => '내구도', 4 => '마법능력', 5 => '민첩', 6 => '기술', 7 => '행운' }
+    labels.filter_map { |c, l| v = row[c].to_i; "#{l} #{v.positive? ? '+' : ''}#{v}" unless v.zero? }.join(', ')
+  end
+
+  # 전투 스탯을 읽을 때 장비 보너스를 더한다 (표의 원래 값은 그대로).
+  def add_equipment_bonus!(sheet)
+    engine = self
+    sheet.define_singleton_method(:read_base_stats) do
+      super().map do |st|
+        bonus = engine.equipment_bonus(st[:id])
+        bonus.empty? ? st : st.merge(bonus.to_h { |k, v| [k, st[k].to_i + v] })
+      end
+    end
+  end
+
+  # 러너 스킬 표 + 회복 아이템 → BattleSkills::SKILLS
+  def install_skills!
+    table = SkillCatalog.build(@store.book('app')['스킬']).dup
+    item_rows.each do |r|
+      next unless r[1].to_s == '회복'
+      table[r[0].to_s.strip] = { category: '지원', range: '제한 없음', cooldown: 0, kind: :heal_fixed, value: r[2].to_i }.freeze
+    end
+    BattleSkills.send(:remove_const, :SKILLS)
+    BattleSkills.const_set(:SKILLS, table.freeze)
   end
 
   def table_rows(book, tab)
@@ -197,6 +318,9 @@ class RaidEngine
         r['house'] = row[2].to_s
       end
       c = creatures[b.dig('creature', 'name').to_s] || []
+      cheer = @cheers[b['id']]
+      b['cheers'] = { 'counts' => cheer['counts'], 'recent' => cheer['recent'].last(12).reverse }
+      b['watchers'] = watcher_names
       b['creature']['img'] = c[17].to_s
       b['creature']['omen'] = @sessions[b['id']]&.creature&.dig(:omen).to_s
     end
@@ -232,7 +356,8 @@ class RaidEngine
     'runners'     => ['runner', '스탯'],
     'creatures'   => ['creature', '스탯'],
     'boss_skills' => ['creature', '보스스킬'],
-    'runner_skills' => ['app', '스킬']
+    'runner_skills' => ['app', '스킬'],
+    'items' => ['app', '아이템']
   }.freeze
 
   def check_unique!(rows, col, label)
@@ -257,12 +382,25 @@ class RaidEngine
     when 'creatures' then check_unique!(rows, 1, '이름')
     when 'boss_skills' then check_unique!(rows, 0, '스킬명')
     when 'runner_skills' then SkillCatalog.validate!(rows)
+    when 'items' then validate_items!(rows)
     end
     @store.replace_tab!(book, tab, rows)
-    SkillCatalog.install!(@store.book('app')['스킬']) if key == 'runner_skills'
+    install_skills! if %w[runner_skills items].include?(key)
     @runner_sheet.invalidate_base_stats_cache!
     $boss_skill_cache = nil
     bump!
+  end
+
+  def validate_items!(rows)
+    check_unique!(rows, 0, '아이템 이름')
+    skill_names = (@store.book('app')['스킬'] || [])[1..].to_a.map { |r| r[0].to_s.strip }
+    rows[1..].to_a.each do |r|
+      name = r[0].to_s
+      raise "아이템 이름에는 [ ] / , : 를 쓸 수 없습니다: #{name}" if name.match?(%r{[\[\]/,:]})
+      raise "'#{name}'은(는) 러너 스킬 이름과 같아서 쓸 수 없습니다." if skill_names.include?(name)
+      raise "'#{name}'의 종류를 골라 주세요." unless ITEM_TYPES.include?(r[1].to_s)
+      raise "'#{name}'의 회복량을 1 이상으로 넣어 주세요." if r[1] == '회복' && r[2].to_i <= 0
+    end
   end
 
   def heal_all!
@@ -286,7 +424,7 @@ class RaidEngine
   end
 
   # ── 전투 시작/종료 ──────────────────────────────────────────
-  def start_battle!(runners:, creature_name:, auto_mode: false, positions: {})
+  def start_battle!(runners:, creature_name:, auto_mode: false, positions: {}, hps: {})
     runners = Array(runners).map { |r| r.to_s.strip }.reject(&:empty?).uniq
     raise '참여자를 한 명 이상 고르세요.' if runners.empty?
     busy = runners.select { |r| @sessions.values.any? { |s| s.active && s.includes_runner?(r) } }
@@ -295,6 +433,17 @@ class RaidEngine
     creature = creature_from_stats_sheet_by_name(@creature_sheet, creature_name)
     raise "크리쳐 '#{creature_name}'을(를) 찾지 못했습니다." unless creature
     creature[:pos] = 'D4' if creature[:pos].to_s.strip.empty?
+
+    # 관리자가 넣은 시작 체력 (최대 건강을 넘으면 최대 건강으로)
+    hps.to_h.each do |id, hp|
+      next unless runners.include?(id.to_s) && hp.to_s.strip.match?(/\A\d+\z/)
+      row = runner_row(id) or next
+      max = row[10].to_i.positive? ? row[10].to_i : hp.to_i
+      raise "#{row[1].to_s.empty? ? id : row[1]}의 시작 체력은 1 이상이어야 합니다." if hp.to_i < 1
+      row[4] = [hp.to_i, max].min.to_s
+    end
+    @store.save!
+    @runner_sheet.invalidate_base_stats_cache!
 
     id = Time.now.strftime('%Y%m%d%H%M%S') + SecureRandom.hex(2)
     session = BattleSession.new(id: id, mode: :public, runner_names: runners, creature: creature.dup)
@@ -444,6 +593,11 @@ class RaidEngine
       'submitted' => s.actions[name] ? { 'type' => s.actions[name][:type].to_s.sub('순간이동', '이동'), 'target' => s.actions[name][:target] } : nil,
       'prep_done' => s.phase == :prep && ctx[:positions].to_h[name].to_s != '',
       'notice' => @listener.notice_for(name),
+      'equipment' => equipment(name).map { |r| { 'name' => r[0], 'type' => r[1], 'bonus' => bonus_text(r) } },
+      'items' => item_rows.select { |r| r[1] == '회복' }.filter_map do |r|
+        c = item_count(name, r[0])
+        { 'name' => r[0], 'count' => c, 'value' => r[2].to_i, 'desc' => r[8].to_s, 'target' => 'runner', 'range' => '제한 없음', 'max_targets' => 1, 'item' => true } if c.positive?
+      end,
       'skills' => skills.map do |item|
         sk = item[:name]
         d = BattleSkills.get(sk) || {}
@@ -513,6 +667,86 @@ class RaidEngine
     end
   end
 
+  # ── 관전자: 이름 + 응원 버튼 (채팅 없음) ─────────────────────
+  CHEERS = { 'clap' => '👏 박수', 'fire' => '🔥 힘내!', 'guard' => '🛡️ 버텨!', 'star' => '✨ 멋져요!', 'wow' => '😱 조심!' }.freeze
+
+  def clean_name(name)
+    n = name.to_s.gsub(/[[:cntrl:]<>]/, '').strip
+    raise '이름을 1~12자로 넣어 주세요.' if n.empty? || n.length > 12
+    n
+  end
+
+  def watcher_hello!(name)
+    n = clean_name(name)
+    fresh = !@watchers.key?(n) || @watchers[n] < Time.now - 60
+    @watchers[n] = Time.now
+    bump! if fresh
+    n
+  end
+
+  def watcher_names
+    @watchers.delete_if { |_, t| t < Time.now - 70 }
+    @watchers.keys.sort
+  end
+
+  def cheer!(battle_id, name, kind, ip)
+    n = clean_name(name)
+    raise '없는 응원입니다.' unless CHEERS.key?(kind.to_s)
+    s = @sessions[battle_id.to_s]
+    raise '진행 중인 전투가 아닙니다.' unless s && s.active
+    k = "#{ip}|#{n}"
+    raise '응원은 2초에 한 번씩 보낼 수 있어요.' if @cheer_last[k] && Time.now - @cheer_last[k] < 2
+    @cheer_last[k] = Time.now
+    @watchers[n] = Time.now
+    c = @cheers[s.id]
+    c['counts'][kind.to_s] += 1
+    c['recent'] << { 'name' => n, 'kind' => kind.to_s, 'text' => CHEERS[kind.to_s], 'at' => Time.now.to_i }
+    c['recent'].shift while c['recent'].size > 30
+    bump!
+  end
+
+  # ── 관리자 로그인: 비밀번호 → 브라우저 쿠키(12시간). 5번 틀리면 10분 잠금 ──
+  ADMIN_TTL = 12 * 3600
+
+  def admin_login!(password, ip)
+    now = Time.now
+    fails = @login_fails[ip].select! { |t| t > now - 600 } || @login_fails[ip]
+    all = @login_fails.values.flatten.count { |t| t > now - 600 }
+    raise '비밀번호를 여러 번 틀려서 10분 동안 잠겼습니다.' if fails.size >= 5 || all >= 30
+    unless secure_eq(password.to_s, admin_key.to_s)
+      fails << now
+      raise "관리자 비밀번호가 틀렸습니다. (#{5 - fails.size}번 남음)"
+    end
+    @login_fails.delete(ip)
+    token = SecureRandom.hex(24)
+    @admin_sessions[token] = now + ADMIN_TTL
+    token
+  end
+
+  def admin?(token)
+    t = @admin_sessions[token.to_s]
+    return false unless t && t > Time.now
+    true
+  end
+
+  def admin_logout!(token)
+    @admin_sessions.delete(token.to_s)
+  end
+
+  def change_password!(old, new_pw, keep_token)
+    raise '지금 비밀번호가 틀렸습니다.' unless secure_eq(old.to_s, admin_key.to_s)
+    new_pw = new_pw.to_s.strip
+    raise '새 비밀번호는 6자 이상으로 해 주세요.' if new_pw.length < 6
+    settings['admin_key'] = new_pw
+    @store.save!
+    @admin_sessions.select! { |k, _| k == keep_token }
+  end
+
+  def secure_eq(a, b)
+    return false unless a.bytesize == b.bytesize
+    a.bytes.zip(b.bytes).reduce(0) { |acc, (x, y)| acc | (x ^ y) }.zero?
+  end
+
   def admin_view
     @mutex.synchronize do
       {
@@ -521,6 +755,7 @@ class RaidEngine
         'creature_names' => creature_names,
         'boss_skills' => boss_skill_names,
         'kinds' => SkillCatalog::KINDS,
+        'item_types' => ITEM_TYPES,
         'version' => @version,
         'battles' => @sessions.values.map do |s|
           {

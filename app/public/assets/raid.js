@@ -24,7 +24,8 @@ addEventListener('storage', e => { if (e.key === 'raidTheme' && e.newValue) docu
 
 /* 공통 상단 메뉴 */
 function navBar(active, extra = '') {
-  const items = [['/', '로비', 'lobby'], ['/watch', '관전', 'watch'], ['/admin', '관리자', 'admin']];
+  const items = [['/', '로비', 'lobby'], ['/watch', '관전', 'watch']];
+  if (isAdmin() || active === 'admin') items.push(['/admin', '관리자', 'admin']);
   const el = document.createElement('nav');
   el.className = 'nav';
   el.innerHTML = `<span class="brand">RAID</span>` +
@@ -77,6 +78,7 @@ function manhattan(a, b) { const p = parsePos(a), q = parsePos(b); return p && q
 // 기존 규칙: "근접" = 대각선 포함 1칸, 숫자 사거리 = 가로+세로 칸 수
 function inRange(from, to, range) {
   if (range === '근접') return chebyshev(from, to) <= 1;
+  if (range === '제한 없음') return true;
   const n = parseInt(range, 10);
   return Number.isFinite(n) ? manhattan(from, to) <= n : false;
 }
@@ -143,7 +145,7 @@ async function api(path, body, headers = {}) {
     method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, headers), body: JSON.stringify(body)
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `오류 (${res.status})`);
+  if (!res.ok) { const e = new Error(data.error || `오류 (${res.status})`); e.login = !!data.login; throw e; }
   return data;
 }
 
@@ -174,4 +176,16 @@ function bigTimer(b, skew) {
   if (!b || !b.active || (b.phase !== 'battle' && b.phase !== 'prep')) return '';
   const left = Math.max(0, b.round_started_at + b.action_wait - (Math.floor(Date.now() / 1000) + (skew || 0)));
   return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
+
+/* 관리자로 로그인한 브라우저인지 (화면 표시용 표식일 뿐, 권한 확인은 서버가 한다) */
+function isAdmin() { return /(?:^|;\s*)raid_is_admin=1/.test(document.cookie); }
+
+/* 응원: 관전자가 누른 버튼 집계와 최근 기록 */
+const CHEERS = { clap: '👏 박수', fire: '🔥 힘내!', guard: '🛡️ 버텨!', star: '✨ 멋져요!', wow: '😱 조심!' };
+function cheerFeedHTML(b, limit = 8) {
+  const list = (b.cheers?.recent || []).slice(0, limit);
+  const w = b.watchers || [];
+  return `<div class="cheerfeed">${list.map(c => `<div><b>${esc(c.name)}</b>${esc(c.text)}</div>`).join('') || '<div class="sub" style="border:0">아직 응원이 없어요.</div>'}</div>
+    <div class="watchers">관전 중 ${w.length}명${w.length ? ' · ' + w.slice(0, 12).map(esc).join(', ') + (w.length > 12 ? ' …' : '') : ''}</div>`;
 }

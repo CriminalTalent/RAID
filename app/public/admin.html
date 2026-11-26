@@ -11,14 +11,14 @@
 <div class="page" id="root"></div>
 <script>
 navBar('admin');
-let key = localStorage.getItem('raidAdminKey') || '';
+localStorage.removeItem('raidAdminKey');
 let shareBase = localStorage.getItem('raidShareBase') || '';
 let view = null, live_ = { battles: [] }, skew = 0, msg = null;
 let section = 'battle';
 let sel = {};                         // 표마다 고른 줄 번호
 let draft = {};                       // 표마다 편집 중인 사본 (저장 전)
 let dirty = {};
-const form = { slots: [], creature: '', auto: false, positions: {}, placing: null };
+const form = { slots: [], creature: '', auto: false, positions: {}, placing: null, hps: {} };
 function cellsOf(pos, size) {
   const p = parsePos(pos); if (!p) return [];
   const m = /(\d+)\s*x\s*(\d+)/i.exec(size || '1x1') || [0, 1, 1];
@@ -32,6 +32,7 @@ const focusBattle = decodeURIComponent(location.hash.slice(1));
 /* ── 표 정의: 칸 번호 → 화면 이름/입력 방식 ─────────────────── */
 const HOUSES = ['', '그리핀도르', '슬리데린', '래번클로', '후플푸프'];
 const FACING = ['하', '상', '좌', '우'];
+const ROLES = ['', '수호', '공격', '지원'];
 const SCHEMA = {
   runners: {
     title: '러너', keyCol: 0, sub: r => `${r[1] || ''} · ${r[13] || '역할 없음'} · HP ${r[10] || r[4] || '-'}`,
@@ -39,10 +40,12 @@ const SCHEMA = {
     fields: [
       [0, 'ID'], [1, '표시 이름'], [2, '기숙사', HOUSES], [3, '패시브', ['1', '2']],
       [4, '현재 건강', 'num'], [10, '최대 건강', 'num'], [5, '내구도', 'num'], [6, '마법능력', 'num'],
-      [7, '민첩', 'num'], [8, '기술', 'num'], [9, '행운', 'num'], [13, '역할', ['', '탱커', '딜러', '힐러']],
+      [7, '민첩', 'num'], [8, '기술', 'num'], [9, '행운', 'num'], [13, '역할', ROLES],
+      [15, '장비 (종류마다 하나씩 · 누르면 착용/해제 · 전투 스탯에 보너스가 더해져요)', 'equip'],
+      [16, '소지품 (전투 중 쓸 수 있는 회복 아이템 개수 · 쓰면 1개씩 줄어요)', 'inv'],
       [14, '이미지 주소 (선택)', 'wide']
     ],
-    blank: () => ['', '', '', '1', '50', '10', '10', '10', '10', '10', '50', '', '하', '딜러', '']
+    blank: () => ['', '', '', '1', '50', '10', '10', '10', '10', '10', '50', '', '하', '공격', '', '', '']
   },
   creatures: {
     title: '크리쳐 (보스몹)', keyCol: 1, sub: r => `HP ${r[5] || '-'} · ${r[2] || 'D4'} · ${r[3] || '1x1'}`,
@@ -66,6 +69,16 @@ const SCHEMA = {
     ],
     blank: () => ['새 스킬', '공격', '', '0', '1.5', '', '', '', '', '1', '', '']
   },
+  items: {
+    title: '아이템', keyCol: 0, sub: r => `${r[1] || ''} · ${r[1] === '회복' ? '건강 +' + (r[2] || 0) : bonusText(r) || '보너스 없음'}`,
+    help: '회복 아이템은 전투 중 [아이템 이름/대상]으로 한 명을 회복해요(사거리 제한 없음). 무기·갑옷·장신구는 러너 화면에서 착용시키면 전투 스탯에 보너스가 더해집니다. 러너에게 나눠 주는 건 러너 메뉴의 소지품/장비에서 해요.',
+    fields: [
+      [0, '이름'], [1, '종류', ['회복', '무기', '갑옷', '장신구']], [2, '회복량 (회복 아이템)', 'num'],
+      [3, '내구도 +', 'num'], [4, '마법능력 +', 'num'], [5, '민첩 +', 'num'], [6, '기술 +', 'num'], [7, '행운 +', 'num'],
+      [8, '설명', 'wide']
+    ],
+    blank: () => ['새 아이템', '회복', '20', '', '', '', '', '', '']
+  },
   runner_skills: {
     title: '러너 스킬', keyCol: 0, sub: r => `${r[1] || ''} · ${r[12] === 'O' ? '참여자 화면에 보임' : '숨김'}`,
     help: '계산은 "효과"로 정해져요. 이름을 바꾸거나, 같은 효과로 배율·사거리만 다른 새 스킬을 만들어도 기존 규칙대로 계산됩니다. 사거리: 자신 / 근접(대각선 포함 1칸) / 숫자(가로+세로 칸 수).',
@@ -78,7 +91,11 @@ const SCHEMA = {
   }
 };
 const FIXED_KINDS = ['teleport', 'pass'];
-const H = () => ({ 'X-Admin-Key': key });
+const H = () => ({});
+const BONUS = [[3, '내구도'], [4, '마법능력'], [5, '민첩'], [6, '기술'], [7, '행운']];
+const bonusText = r => BONUS.filter(([c]) => +r[c]).map(([c, l]) => `${l} ${+r[c] > 0 ? '+' : ''}${+r[c]}`).join(', ');
+const itemRows = () => (draft.items || view.tables.items || [[]]).slice(1).filter(x => x[0]);
+const invOf = v => Object.fromEntries(String(v || '').split(',').map(x => x.split(':').map(y => y.trim())).filter(([n]) => n).map(([n, c]) => [n, c === undefined || c === '' ? 1 : +c]));
 
 async function load() {
   try {
@@ -87,7 +104,7 @@ async function load() {
     render();
     startLive();
   } catch (e) {
-    if (/비밀번호/.test(e.message)) return login(e.message);
+    if (e.login) return login();
     msg = { cls: 'err', text: e.message }; render();
   }
 }
@@ -98,26 +115,49 @@ async function act(path, body, ok) {
 }
 
 function login(err) {
+  view = null;
   $('root').innerHTML = `<div class="card" style="max-width:360px;margin:40px auto">
-    <div class="card-h"><h2>관리자 비밀번호</h2></div>
-    <p class="sub">start.bat 을 켠 검은 창에 나온 비밀번호를 넣으세요.</p>
-    ${err && key ? `<div class="msg err">${esc(err)}</div>` : ''}
-    <div class="btns" style="flex-wrap:nowrap"><input id="pw" type="password" autofocus><button class="primary" id="go">들어가기</button></div></div>`;
-  const go = () => { key = $('pw').value.trim(); localStorage.setItem('raidAdminKey', key); load(); };
+    <div class="card-h"><h2>관리자 로그인</h2></div>
+    <p class="sub">start.bat 을 켠 검은 창에 나온 비밀번호(또는 바꾼 비밀번호)를 넣으세요. 5번 틀리면 10분 동안 잠겨요.</p>
+    ${err ? `<div class="msg err">${esc(err)}</div>` : ''}
+    <div class="btns" style="flex-wrap:nowrap"><input id="pw" type="password" autocomplete="current-password" autofocus><button class="primary" id="go">들어가기</button></div></div>`;
+  const go = async () => {
+    try { await api('/api/login', { password: $('pw').value.trim() }); load(); }
+    catch (e) { login(e.message); }
+  };
   $('go').onclick = go; $('pw').onkeydown = e => e.key === 'Enter' && go();
+}
+
+function settingsHTML() {
+  return `<div class="card" style="max-width:420px"><div class="card-h"><h2>설정</h2><button class="sm" id="logout">로그아웃</button></div>
+    <p class="sub">비밀번호를 바꾸면 다른 기기에 로그인된 관리자 창은 모두 로그아웃돼요. 로그인은 12시간 동안 유지됩니다.</p>
+    <div class="form" style="grid-template-columns:1fr">
+      <div class="f"><label for="oldpw">지금 비밀번호</label><input id="oldpw" type="password" autocomplete="current-password"></div>
+      <div class="f"><label for="newpw">새 비밀번호 (6자 이상)</label><input id="newpw" type="password" autocomplete="new-password"></div>
+      <div class="f"><label for="newpw2">새 비밀번호 확인</label><input id="newpw2" type="password" autocomplete="new-password"></div>
+    </div>
+    <div class="btns" style="margin-top:12px"><button class="primary sm" id="chpw">비밀번호 바꾸기</button></div></div>`;
+}
+function bindSettings() {
+  $('logout').onclick = async () => { await api('/api/logout', {}).catch(() => {}); login(); };
+  $('chpw').onclick = () => {
+    if ($('newpw').value !== $('newpw2').value) { msg = { cls: 'err', text: '새 비밀번호 두 칸이 다릅니다.' }; return render(); }
+    act('/api/admin/password', { old: $('oldpw').value, new: $('newpw').value }, '비밀번호를 바꿨습니다. 다음 로그인부터 새 비밀번호를 쓰세요.');
+  };
 }
 
 function render() {
   if (!view) return;
   const counts = k => Math.max(0, (view.tables[k] || []).length - 1);
   const items = [['battle', '전투 진행', view.battles.filter(b => b.active).length], ['runners', '러너', counts('runners')],
-    ['creatures', '크리쳐 (보스몹)', counts('creatures')], ['boss_skills', '보스 스킬', counts('boss_skills')], ['runner_skills', '러너 스킬', counts('runner_skills')]];
+    ['creatures', '크리쳐 (보스몹)', counts('creatures')], ['boss_skills', '보스 스킬', counts('boss_skills')], ['runner_skills', '러너 스킬', counts('runner_skills')],
+    ['items', '아이템', counts('items')], ['settings', '설정', '']];
   const m = msg ? `<div class="msg ${msg.cls}">${esc(msg.text)}</div>` : '';
   $('root').innerHTML = `<div class="admin">
     <div class="side">${items.map(([k, l, n]) => `<button data-sec="${k}" class="${section === k ? 'on' : ''}">${l}${dirty[k] ? ' •' : ''}<span class="cnt">${n}</span></button>`).join('')}</div>
-    <div>${m}${section === 'battle' ? battleHTML() : editorHTML(section)}</div></div>`;
+    <div>${m}${section === 'battle' ? battleHTML() : section === 'settings' ? settingsHTML() : editorHTML(section)}</div></div>`;
   document.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => { section = b.dataset.sec; msg = null; section === 'battle' ? load() : render(); });
-  section === 'battle' ? bindBattle() : bindEditor(section);
+  section === 'battle' ? bindBattle() : section === 'settings' ? bindSettings() : bindEditor(section);
 }
 
 /* ── 전투 진행 ─────────────────────────────────── */
@@ -131,6 +171,7 @@ function battleHTML() {
   const free = id => !busy.has(id) && !form.slots.includes(id);
   const slotHTML = (id, i) => `<div class="slot ${form.placing === id ? 'on' : ''}">
       <select data-slot="${i}">${roster.filter(r => r[0] === id || free(r[0])).map(r => `<option value="${esc(r[0])}" ${r[0] === id ? 'selected' : ''}>${esc(r[1] || r[0])} · ${esc(r[13] || '역할 없음')}</option>`).join('')}</select>
+      <label class="hpin" title="이 전투를 시작할 때의 체력 (최대 ${esc(rowOf(id)[10] || rowOf(id)[4])})">HP<input data-hp="${esc(id)}" inputmode="numeric" value="${esc(form.hps[id] ?? (rowOf(id)[10] || rowOf(id)[4] || ''))}"></label>
       <button class="sm ${form.placing === id ? 'on' : ''}" data-place="${esc(id)}">${form.positions[id] ? '위치 ' + esc(form.positions[id]) : '위치 지정'}</button>
       <button class="sm ghost" data-unslot="${i}" title="빼기">✕</button></div>`;
   const crow = view.tables.creatures.slice(1).find(r => r[1] === form.creature) || [];
@@ -146,7 +187,7 @@ function battleHTML() {
         ${form.slots.map(slotHTML).join('') || '<div class="sub" style="margin-bottom:6px">아래 버튼으로 참여자를 넣으세요.</div>'}
         <div class="btns"><button class="sm" id="addslot" ${roster.some(r => free(r[0])) ? '' : 'disabled'}>+ 참여자 추가</button>
           <button class="primary" id="start" ${form.slots.length ? '' : 'disabled'}>전투 시작</button></div>
-        <p class="sub" style="margin-top:8px">시작 위치: 참여자의 "위치 지정"을 누르고 오른쪽 격자를 클릭하세요. 정하지 않은 사람은 전투 시작 후 각자 고릅니다.</p>
+        <p class="sub" style="margin-top:8px">HP: 이 전투를 시작할 때의 체력이에요(최대 건강까지). 시작 위치: 참여자의 "위치 지정"을 누르고 오른쪽 격자를 클릭하세요. 정하지 않은 사람은 전투 시작 후 각자 고릅니다.</p>
       </div>
       <div class="center" id="placegrid">${gridHTML(fake, { pickable: form.placing ? (p => !fake.creature.cells.includes(p)) : null })}</div>
     </div></div>`;
@@ -173,7 +214,7 @@ function battleCard(b) {
   if (b.active && b.awaiting_boss) boss = `<div class="msg info" style="margin-bottom:8px">보스 행동을 정하세요. 대상이나 칸을 안 고르면 스킬 설정대로 정해집니다.</div>
     <div class="btns">${(b.boss_skills || view.boss_skills).map(s => `<button class="sm ${p.skill === s ? 'on' : ''}" data-bskill="${b.id}|${esc(s)}">${esc(s)}</button>`).join('')}</div>
     <div class="sec">대상 러너</div><div class="btns">${b.runners.map(r => `<button class="sm ${p.targets.has(r) ? 'on' : ''}" data-btarget="${b.id}|${esc(r)}">${esc(disp(r))}${roleOf(r) ? ' · ' + esc(roleOf(r)) : ''}</button>`).join('')}
-      <button class="sm ghost" data-btank="${b.id}">탱커 전원</button></div>
+      <button class="sm ghost" data-btank="${b.id}">수호 역할 전원</button></div>
     <div class="sub" style="margin:6px 0">범위 칸: 격자를 누르세요 · ${[...p.cells].join(', ') || '없음'}</div>
     <div class="btns"><button class="primary sm" data-bgo="${b.id}" ${p.skill ? '' : 'disabled'}>보스 행동 확정</button><button class="sm ghost" data-bclear="${b.id}">지우기</button></div>`;
 
@@ -202,6 +243,7 @@ function bindBattle() {
     render();
   });
   document.querySelectorAll('[data-unslot]').forEach(b => b.onclick = () => { const id = form.slots.splice(+b.dataset.unslot, 1)[0]; delete form.positions[id]; render(); });
+  document.querySelectorAll('[data-hp]').forEach(i => i.oninput = () => { form.hps[i.dataset.hp] = i.value.trim(); });
   document.querySelectorAll('[data-place]').forEach(b => b.onclick = () => { form.placing = form.placing === b.dataset.place ? null : b.dataset.place; render(); });
   $('addslot').onclick = () => {
     const busy = new Set(view.battles.filter(x => x.active).flatMap(x => x.runners));
@@ -215,8 +257,9 @@ function bindBattle() {
     const nextId = form.slots.find(x => !form.positions[x]); form.placing = nextId || null; render();
   });
   $('start').onclick = async () => {
-    const ok = await act('/api/admin/start', { runners: form.slots, creature: form.creature, auto: form.auto, positions: form.positions }, '전투를 시작했습니다. 참여자 링크를 보내 주세요.');
-    if (ok) { form.slots = []; form.positions = {}; form.placing = null; render(); }
+    const hps = Object.fromEntries(form.slots.map(id => [id, document.querySelector(`[data-hp="${CSS.escape(id)}"]`)?.value.trim() || '']));
+    const ok = await act('/api/admin/start', { runners: form.slots, creature: form.creature, auto: form.auto, positions: form.positions, hps }, '전투를 시작했습니다. 참여자 링크를 보내 주세요.');
+    if (ok) { form.slots = []; form.positions = {}; form.placing = null; form.hps = {}; render(); }
   };
   $('heal').onclick = () => act('/api/admin/heal', {}, '러너 전원의 체력을 최대로 채웠습니다.');
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
@@ -229,7 +272,7 @@ function bindBattle() {
   document.querySelectorAll('[data-btarget]').forEach(b => b.onclick = () => { const [id, r] = b.dataset.btarget.split('|'); const t = bossPick[id].targets; t.has(r) ? t.delete(r) : t.add(r); render(); });
   document.querySelectorAll('[data-btank]').forEach(b => b.onclick = () => {
     const id = b.dataset.btank, bt = view.battles.find(x => x.id === id);
-    bossPick[id].targets = new Set(bt.runners.filter(r => (view.tables.runners.find(x => x[0] === r) || [])[13] === '탱커')); render();
+    bossPick[id].targets = new Set(bt.runners.filter(r => (view.tables.runners.find(x => x[0] === r) || [])[13] === '수호')); render();
   });
   document.querySelectorAll('[data-bclear]').forEach(b => b.onclick = () => { delete bossPick[b.dataset.bclear]; render(); });
   document.querySelectorAll('[data-bgo]').forEach(b => b.onclick = () => {
@@ -266,6 +309,16 @@ function fieldHTML(k, r, [col, label, type]) {
     const on = new Set(String(v).split(',').map(x => x.trim()).filter(Boolean));
     const all = (draft.boss_skills || view.tables.boss_skills).slice(1).map(x => x[0]).filter(Boolean);
     input = `<div class="chips">${all.map(n => `<button type="button" class="sm ${on.has(n) ? 'on' : ''}" data-chip="${col}" data-val="${esc(n)}">${on.has(n) ? '✓ ' : '+ '}${esc(n)}</button>`).join('')}</div>`;
+    return `<div class="f wide"><label>${esc(label)}</label>${input}</div>`;
+  } else if (type === 'equip') {
+    const on = new Set(String(v).split(',').map(x => x.trim()).filter(Boolean));
+    const gear = itemRows().filter(x => x[1] !== '회복');
+    input = `<div class="chips">${gear.map(x => `<button type="button" class="sm ${on.has(x[0]) ? 'on' : ''}" data-equip="${esc(x[0])}" data-type="${esc(x[1])}" title="${esc(bonusText(x))}">${on.has(x[0]) ? '✓ ' : '+ '}${esc(x[1])} · ${esc(x[0])}</button>`).join('') || '<span class="sub">아이템 메뉴에서 무기·갑옷·장신구를 먼저 만드세요.</span>'}</div>`;
+    return `<div class="f wide"><label>${esc(label)}</label>${input}</div>`;
+  } else if (type === 'inv') {
+    const inv = invOf(v);
+    const heals = itemRows().filter(x => x[1] === '회복');
+    input = `<div class="inv">${heals.map(x => `<span class="cnt">${esc(x[0])}<input type="number" min="0" max="99" data-inv="${esc(x[0])}" value="${inv[x[0]] || 0}"></span>`).join('') || '<span class="sub">아이템 메뉴에서 회복 아이템을 먼저 만드세요.</span>'}</div>`;
     return `<div class="f wide"><label>${esc(label)}</label>${input}</div>`;
   } else if (type === 'check') {
     input = `<label class="chk" style="height:30px"><input type="checkbox" data-col="${col}" ${['O', 'o', 'TRUE', 'true', '1'].includes(v) ? 'checked' : ''}> 예</label>`;
@@ -317,6 +370,23 @@ function bindEditor(k) {
     set.has(n) ? set.delete(n) : set.add(n);
     r[col] = [...set].join(','); mark(); render();
   });
+  const markSave = () => {
+    if (dirty[k]) return;
+    mark(); $('save').disabled = false; $('revert').disabled = false;
+    $('save').insertAdjacentHTML('beforebegin', '<span class="tag warn">저장 안 됨</span>');
+  };
+  document.querySelectorAll('[data-equip]').forEach(b => b.onclick = () => {
+    const r = rows[sel[k] + 1], n = b.dataset.equip, type = b.dataset.type;
+    const gear = Object.fromEntries(itemRows().map(x => [x[0], x[1]]));
+    let list = String(r[15] || '').split(',').map(x => x.trim()).filter(Boolean);
+    list = list.includes(n) ? list.filter(x => x !== n) : [...list.filter(x => gear[x] !== type), n];
+    r[15] = list.join(','); mark(); render();
+  });
+  document.querySelectorAll('[data-inv]').forEach(i => i.oninput = () => {
+    const r = rows[sel[k] + 1], inv = invOf(r[16]);
+    inv[i.dataset.inv] = Math.max(0, parseInt(i.value, 10) || 0);
+    r[16] = Object.entries(inv).filter(([, c]) => c > 0).map(([n, c]) => `${n}:${c}`).join(','); markSave();
+  });
   $('add').onclick = () => { rows.push(S.blank()); sel[k] = rows.length - 2; mark(); render(); };
   if ($('dup')) $('dup').onclick = () => { const c = [...rows[sel[k] + 1]]; c[S.keyCol] += ' 복사'; rows.splice(sel[k] + 2, 0, c); sel[k]++; mark(); render(); };
   if ($('del')) $('del').onclick = () => {
@@ -333,7 +403,7 @@ function bindEditor(k) {
 window.onbeforeunload = () => Object.values(dirty).some(Boolean) ? '저장하지 않은 내용이 있어요.' : undefined;
 let liveStarted = false;
 function startLive() { if (!liveStarted) { liveStarted = true; live(() => (section === 'battle' && view ? load() : null)); } }
-if (key) load(); else login();
+load();
 startTimers(() => live_.battles || [], () => skew);
 </script>
 </body>

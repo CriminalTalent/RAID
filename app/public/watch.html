@@ -15,6 +15,34 @@
 <script>
 navBar('watch');
 let data = { battles: [] }, skew = 0, selected = decodeURIComponent(location.hash.slice(1));
+let myName = localStorage.getItem('raidWatcherName') || '', cheerMsg = null;
+
+/* 관전자는 이름을 넣고 들어온다. 채팅은 없고 응원 버튼만 있다. */
+function gate(err) {
+  $('tabs').innerHTML = '';
+  $('root').innerHTML = `<div class="card" style="max-width:360px;margin:40px auto">
+    <div class="card-h"><h2>관전 입장</h2></div>
+    <p class="sub">다른 관전자와 참여자에게 보일 이름을 넣어 주세요 (12자까지). 관전 중에는 응원 버튼만 누를 수 있어요.</p>
+    ${err ? `<div class="msg err">${esc(err)}</div>` : ''}
+    <div class="btns" style="flex-wrap:nowrap"><input id="wname" maxlength="12" value="${esc(myName)}" autofocus><button class="primary" id="enter">입장</button></div></div>`;
+  const go = async () => {
+    try { myName = (await api('/api/watch/hello', { name: $('wname').value })).name; localStorage.setItem('raidWatcherName', myName); start(); }
+    catch (e) { gate(e.message); }
+  };
+  $('enter').onclick = go; $('wname').onkeydown = e => e.key === 'Enter' && go();
+}
+let started = false;
+function start() {
+  if (started) return load();
+  started = true;
+  live(load);
+  startTimers(() => data.battles, () => skew);
+  setInterval(() => api('/api/watch/hello', { name: myName }).catch(() => {}), 30000);
+}
+async function cheer(kind) {
+  try { await api('/api/cheer', { id: selected, name: myName, kind }); cheerMsg = null; }
+  catch (e) { cheerMsg = e.message; render(); }
+}
 
 async function load() {
   data = await api('/api/battles');
@@ -43,12 +71,17 @@ function render() {
     </div>
     <div>
       <div class="card"><div class="panel-h boss">보스</div>${bossCardHTML(b)}</div>
+      <div class="card"><div class="card-h"><h2>응원하기</h2><span class="sub">${esc(myName)} 님 · <a href="#" id="rename">이름 바꾸기</a></span></div>
+        ${cheerMsg ? `<div class="msg err">${esc(cheerMsg)}</div>` : ''}
+        ${b.active ? `<div class="cheerbtns">${Object.entries(CHEERS).map(([k, t]) => `<button data-cheer="${k}">${t}<span class="n">${b.cheers?.counts?.[k] || ''}</span></button>`).join('')}</div>` : '<div class="sub">끝난 전투에는 응원할 수 없어요.</div>'}
+        ${cheerFeedHTML(b, 6)}</div>
       <div class="card"><div class="card-h"><h2>전투 기록</h2><span class="sub">최신이 위</span></div><div class="log" style="max-height:460px">${logHTML(b)}</div></div>
     </div>
   </div>`;
+  document.querySelectorAll('[data-cheer]').forEach(x => x.onclick = () => cheer(x.dataset.cheer));
+  $('rename').onclick = e => { e.preventDefault(); gate(); };
 }
-live(load);
-startTimers(() => data.battles, () => skew);
+myName ? api('/api/watch/hello', { name: myName }).then(start).catch(e => gate(e.message)) : gate();
 </script>
 </body>
 </html>
