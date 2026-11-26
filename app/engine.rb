@@ -164,6 +164,8 @@ class RaidEngine
     @cheer_last = {}
     @watchers = {}
     @chats = Hash.new { |h, k| h[k] = [] }
+    @events = Hash.new { |h, k| h[k] = [] }
+    @event_seq = 0
     @chat_last = {}
     settings['admin_key'] ||= SecureRandom.alphanumeric(10)
     unless @store.book('app')['스킬']
@@ -324,6 +326,7 @@ class RaidEngine
       b['cheers'] = { 'counts' => cheer['counts'], 'recent' => cheer['recent'].last(12).reverse }
       b['watchers'] = watcher_names
       b['chat'] = @chats[b['id']].last(80)
+      b['events'] = @events[b['id']].last(20)
       b['creature']['img'] = c[17].to_s
       b['creature']['omen'] = @sessions[b['id']]&.creature&.dig(:omen).to_s
     end
@@ -522,6 +525,36 @@ class RaidEngine
     tick!
   end
 
+  # ── 화면 가운데 띄우는 발동 알림 (오버레이) ──────────────────
+  def add_event!(s, kind, who, name, text = '')
+    @event_seq += 1
+    list = @events[s.id]
+    list << { 'seq' => @event_seq, 'kind' => kind, 'who' => who.to_s, 'name' => name.to_s, 'text' => text.to_s, 'at' => Time.now.to_i }
+    list.shift while list.size > 40
+  end
+
+  def display_of(id)
+    d = runner_row(id).to_a[1].to_s
+    d.empty? ? id.to_s : d
+  end
+
+  # 한 틱 전후를 비교해: 정산이 끝났으면 러너 스킬 → 보스 스킬 순으로, 새 라운드가 열리면 보스 전조를 알린다.
+  def overlay_events!(s, before)
+    if before[:phase] == :battle && s.phase != :battle
+      before[:actions].each do |name, a|
+        type = a[:type].to_s.sub('순간이동', '이동')
+        next if type.empty? || type == '관찰'
+        target = a[:target].to_s.split(',').map { |t| s.runner_names.include?(t.strip) ? display_of(t.strip) : t.strip }.join(', ')
+        add_event!(s, 'skill', display_of(name), type, target)
+      end
+      add_event!(s, 'boss', s.creature[:name], before[:skill]) unless before[:skill].empty?
+    end
+    if s.phase == :battle && (before[:phase] != :battle || before[:round] != s.round)
+      omen = s.creature[:omen].to_s.strip
+      add_event!(s, 'omen', s.creature[:name], s.creature[:current_skill].to_s, omen) unless omen.empty?
+    end
+  end
+
   # 승리/패배 안내 (기존 봇은 조사봇 시트에 보상을 주며 안내했지만, 웹앱에서는 기록만 남긴다)
   def announce_finish!(s)
     return if s.instance_variable_get(:@web_finish_noted)
@@ -534,6 +567,7 @@ class RaidEngine
              "[패배] #{s.creature[:name]}에게 전원 전투불능"
            end
     post_session_thread(s, text, @last_post_time)
+    add_event!(s, 'end', s.creature[:name], text.sub(/\A\[(.+?)\].*/m, '\\1'), text)
   end
 
   # ── 참여자 ──────────────────────────────────────────────────
@@ -640,6 +674,7 @@ class RaidEngine
         begin
           next unless s.active
           was_active = true
+          before = { phase: s.phase, round: s.round, actions: s.actions.dup, skill: s.creature[:current_skill].to_s }
           if s.phase == :prep && !s.announced
             @last_post_time = announce_prep_round(s, @runner_sheet, @runner_sheet, @last_post_time)
           end
@@ -651,6 +686,7 @@ class RaidEngine
             @last_post_time = announce_boss_turn(s, @runner_sheet, @runner_sheet, @last_post_time)
           end
           @last_post_time, = settle_session_if_needed(s, @runner_sheet, @creature_sheet, @runner_sheet, @last_post_time, nil, nil)
+          overlay_events!(s, before)
           announce_finish!(s) if was_active && !s.active
         rescue => e
           puts "[엔진 오류] #{e.class}: #{e.message}"

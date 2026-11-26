@@ -161,7 +161,7 @@ function bindSettings() {
   };
 }
 
-function render() { section === 'battle' ? keepInputs(draw) : draw(); }
+function render() { section === 'battle' ? keepInputs(draw) : draw(); overlayEvents(live_.battles || []); }
 function draw() {
   if (!view) return;
   const counts = k => Math.max(0, (view.tables[k] || []).length - 1);

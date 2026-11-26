@@ -20,7 +20,8 @@ const skillOf = n => [...(me.skills || []), ...(me.items || [])].find(s => s.nam
 const myPos = () => ((battle.runners || []).find(r => r.name === me.me) || {}).pos || me.my_pos;
 function rangeSet(s) {
   const set = new Set(), from = myPos();
-  if (!s || s.item || !from || !['creature', 'creature_cell', 'runner', 'runner_cell', 'runner_skill'].includes(s.target)) return set;
+  if (!s || s.item || !from || s.range === '자신' || s.range === '-' || !s.range) return set;
+  if (s.kind === 'teleport') { COLS.forEach(x => ROWS.forEach(y => { if (chebyshev(from, x + y) === 1) set.add(x + y); })); return set; }
   COLS.forEach(x => ROWS.forEach(y => { if (inRange(from, x + y, s.range)) set.add(x + y); }));
   return set;
 }
@@ -120,7 +121,18 @@ function actionHTML() {
   return h;
 }
 
-function render() { keepInputs(draw); initRings(() => battle ? [battle] : [], () => skew); }
+function legendHTML(s) {
+  if (!s) return '<span class="sub">스킬에 마우스를 올리면 사거리가 격자에 표시돼요.</span>';
+  if (s.item) return `<span class="sub">${esc(s.name)} · 사거리 제한 없음 (1명)</span>`;
+  const n = rangeSet(s).size;
+  return `<span class="key inr"></span><span>${esc(s.name)} 사거리 ${esc(s.range || '-')}</span>${n ? '' : ' <span class="sub">(자신에게만 / 사거리 없음)</span>'}<span class="key bs"></span><span>보스 범위</span>`;
+}
+function previewRange(s) {
+  const set = rangeSet(s);
+  document.querySelectorAll('#grid .cell').forEach(c => c.classList.toggle('inrange', set.has(c.dataset.pos)));
+  const l = $('legend'); if (l) l.innerHTML = legendHTML(s);
+}
+function render() { keepInputs(draw); overlayEvents(battle ? [battle] : []); initRings(() => battle ? [battle] : [], () => skew); }
 function draw() {
   if (!battle) { $('root').innerHTML = '<div class="card empty">전투 정보를 기다리는 중…</div>'; return; }
   document.title = `RAID · ${me.display}`;
@@ -134,12 +146,14 @@ function draw() {
   const moveSet = s && s.target === 'cell' ? new Set(COLS.flatMap(x => ROWS.map(y => x + y)).filter(p => chebyshev(myPos(), p) === 1 && !occupied.has(p))) : null;
   $('root').innerHTML = `
   <div class="stage">
-    <div class="card"><div class="panel-h">러너 팀</div>${teamHTML(battle, me.me)}</div>
+    <div class="leftcol"><div class="card"><div class="panel-h">러너 팀</div>${teamHTML(battle, me.me)}</div>
+      <div class="card chatcard"><div class="card-h"><h2>채팅</h2><span class="sub">참여자·진행자</span></div>${chatHTML(battle, { mine: 'p:' + me.me, canSend: true })}</div></div>
     <div>
       <div class="card center">
         <div class="status" style="text-align:left"><span><b>${battle.phase === 'prep' ? '준비' : battle.round + '라운드'}</b> <span class="sub">${esc(battle.active ? (PHASE[battle.phase] || '') : '전투 종료')}</span></span>
           <span class="timer">${myPos() ? '내 위치 ' + esc(myPos()) : ''}</span></div>
         <div id="grid">${gridHTML(battle, { me: me.me, pickable, inrange: moveSet || (s ? rangeSet(s) : null), picks: new Set(pick.cell ? [pick.cell] : []) })}</div>
+        <div class="legend" id="legend">${legendHTML(s)}</div>
         ${ringHTML(battle, skew)}
         <div class="sub">${esc(me.display)} 님${battle.phase === 'battle' ? ' · 행동 입력 마감까지' : ''}</div>
       </div>
@@ -148,7 +162,6 @@ function draw() {
     </div>
     <div>
       <div class="card"><div class="panel-h boss">보스</div>${bossCardHTML(battle)}</div>
-      <div class="card"><div class="card-h"><h2>채팅</h2><span class="sub">참여자·진행자</span></div>${chatHTML(battle, { mine: 'p:' + me.me, canSend: true })}</div>
       <div class="card"><div class="card-h"><h2>응원</h2></div>${cheerFeedHTML(battle, 4)}</div>
       <div class="card"><div class="card-h"><h2>전투 기록</h2></div><div class="log" style="max-height:380px">${logHTML(battle, 8)}</div></div>
     </div>
@@ -169,6 +182,11 @@ function draw() {
   if ($('go')) $('go').onclick = () => submit(command());
   if ($('cancel')) $('cancel').onclick = () => { reset(); render(); };
   bindChat((id, text) => api('/api/chat', { t: token, text }));
+  // 스킬 버튼에 마우스를 올리면 사거리를 미리 보여 준다
+  document.querySelectorAll('[data-skill]').forEach(b => {
+    b.onmouseenter = () => previewRange(skillOf(b.dataset.skill));
+    b.onmouseleave = () => previewRange(skillOf(pick.skill));
+  });
 }
 
 live(load);

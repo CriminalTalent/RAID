@@ -51,7 +51,7 @@ async function load() {
   render();
 }
 
-function render() { keepInputs(draw); initRings(() => data.battles || [], () => skew); }
+function render() { keepInputs(draw); overlayEvents((data.battles || []).filter(b => b.id === selected)); initRings(() => data.battles || [], () => skew); }
 function draw() {
   const list = (data.battles || []).filter(b => !fixedId || b.id === fixedId);
   if (fixedId && !list.length) { $('tabs').innerHTML = ''; $('root').innerHTML = '<div class="card empty">이 전투는 끝났거나 없는 주소예요. <a href="/watch">진행 중인 전투 보기</a></div>'; return; }
@@ -64,7 +64,8 @@ function draw() {
   const b = list.find(x => x.id === selected);
   $('root').innerHTML = `
   <div class="stage">
-    <div class="card"><div class="panel-h">러너 팀 · ${(b.runners || []).length}명</div>${teamHTML(b)}</div>
+    <div class="leftcol"><div class="card"><div class="panel-h">러너 팀 · ${(b.runners || []).length}명</div>${teamHTML(b)}</div>
+      <div class="card chatcard"><div class="card-h"><h2>채팅</h2><span class="sub">보기 전용</span></div>${chatHTML(b)}</div></div>
     <div class="card center">
       <div class="status" style="text-align:left"><span><b>${b.phase === 'prep' ? '준비' : b.round + '라운드'}</b> <span class="sub">${esc(b.active ? (PHASE[b.phase] || '') : '전투 종료')}</span></span>
         <span class="timer">${b.phase === 'battle' ? `제출 ${(b.submitted || []).length}/${b.required}` : ''}</span></div>
@@ -78,7 +79,6 @@ function draw() {
         ${cheerMsg ? `<div class="msg err">${esc(cheerMsg)}</div>` : ''}
         ${b.active ? `<div class="cheerbtns">${Object.entries(CHEERS).map(([k, t]) => `<button data-cheer="${k}">${t}<span class="n">${b.cheers?.counts?.[k] || ''}</span></button>`).join('')}</div>` : '<div class="sub">끝난 전투에는 응원할 수 없어요.</div>'}
         ${cheerFeedHTML(b, 4)}</div>
-      <div class="card"><div class="card-h"><h2>채팅</h2><span class="sub">보기 전용</span></div>${chatHTML(b)}</div>
       <div class="card"><div class="card-h"><h2>전투 기록</h2><span class="sub">최신이 위</span></div><div class="log" style="max-height:460px">${logHTML(b)}</div></div>
     </div>
   </div>`;

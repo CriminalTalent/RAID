@@ -194,7 +194,7 @@ function cheerFeedHTML(b, limit = 8) {
 /* 원형 타이머: 남은 시간만큼 고리가 줄어든다 */
 const RING_C = 2 * Math.PI * 52;
 function ringHTML(b, skew) {
-  return `<div class="ring" data-ring="${esc(b.id)}"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" stroke-dasharray="${RING_C}" stroke-dashoffset="0" transform="rotate(-90 60 60)"/></svg><span class="t"></span></div>`;
+  return `<div class="ring" data-ring="${esc(b.id)}"><svg viewBox="0 0 120 120"><circle class="ticks" cx="60" cy="60" r="58"/><circle class="track" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52" stroke-dasharray="${RING_C}" stroke-dashoffset="0" transform="rotate(-90 60 60)"/></svg><span class="t"></span></div>`;
 }
 function setRing(el, b, skew) {
   const t = el.querySelector('.t'), arc = el.querySelector('.arc');
@@ -237,4 +237,36 @@ function keepInputs(draw) {
   draw();
   Object.entries(vals).forEach(([id, v]) => { const i = document.getElementById(id); if (i && i.value !== v && i.type !== 'file') i.value = v; });
   if (focus) { const i = document.getElementById(focus[0]); if (i) { i.focus(); try { i.setSelectionRange(focus[1], focus[2]); } catch {} } }
+}
+
+/* 발동 오버레이: "(누구) 스킬 「이름」 발동", 보스 전조, 보스 스킬, 전투 결과를 화면 가운데 잠깐 띄운다.
+   처음 연 순간의 지난 알림은 다시 띄우지 않는다. */
+const ovl = { seen: {}, queue: [], busy: false };
+function overlayEvents(battles) {
+  (battles || []).forEach(b => {
+    const evs = b.events || [], max = evs.reduce((m, e) => Math.max(m, e.seq), 0);
+    if (!(b.id in ovl.seen)) { ovl.seen[b.id] = max; return; }
+    evs.filter(e => e.seq > ovl.seen[b.id]).sort((x, y) => x.seq - y.seq).forEach(e => ovl.queue.push(e));
+    ovl.seen[b.id] = Math.max(ovl.seen[b.id], max);
+  });
+  if (ovl.queue.length > 8) ovl.queue = ovl.queue.slice(-8);
+  showNextOverlay();
+}
+function showNextOverlay() {
+  if (ovl.busy || !ovl.queue.length) return;
+  const e = ovl.queue.shift(); ovl.busy = true;
+  const T = {
+    skill: [esc(e.who), `스킬 「${esc(e.name)}」 발동`, e.text ? '대상 ' + esc(e.text) : ''],
+    boss: [esc(e.who), `보스 스킬 「${esc(e.name)}」 발동`, ''],
+    omen: ['⚠ 전조', esc(e.text), e.name ? `${esc(e.who)} · 「${esc(e.name)}」` : esc(e.who)],
+    end: [esc(e.who), esc(e.name), '']
+  }[e.kind] || [esc(e.who), esc(e.name), ''];
+  const el = document.createElement('div');
+  el.className = `ovl k-${e.kind}`;
+  el.innerHTML = `<div class="ovl-in"><span class="chev">❮❮❮</span><div class="ovl-txt"><div class="ovl-who">${T[0]}</div><div class="ovl-main">${T[1]}</div>${T[2] ? `<div class="ovl-sub">${T[2]}</div>` : ''}</div><span class="chev">❯❯❯</span></div>`;
+  el.onclick = () => el.remove();
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  const ms = e.kind === 'omen' || e.kind === 'end' ? 3200 : 2000;
+  setTimeout(() => { el.classList.remove('show'); setTimeout(() => { el.remove(); ovl.busy = false; showNextOverlay(); }, 300); }, ms);
 }
