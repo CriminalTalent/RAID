@@ -98,14 +98,15 @@ function gridHTML(b, opts = {}) {
       const cls = ['cell', bossCells.has(pos) && 'boss', skillCells.has(pos) && 'skill', opts.inrange?.has(pos) && 'inrange',
         opts.pickable?.(pos) && 'pick', opts.picks?.has(pos) && 'picked'].filter(Boolean).join(' ');
       let inner = '';
-      if (r) inner = `<div class="token ${esc(r.role || '')} ${r.img ? 'pic' : ''} ${r.name === opts.me ? 'me' : ''} ${done.has(r.name) ? 'done' : ''}" title="${esc(r.display)}${r.role ? ' · ' + esc(r.role) : ''}"${r.img ? ` style="background-image:url('${esc(r.img)}')"` : ''}>${r.img ? '' : esc(short(r.display))}</div>`;
-      else if (pos === c.pos) inner = `${c.img ? `<span class="bosspic" style="background-image:url('${esc(c.img)}')"></span>` : esc(short(c.name))}<span class="arrow">${ARROW[c.facing] || ''}</span>`;
+      const hpb = (hp, max, boss) => `<span class="hpb${boss ? ' boss' : ''}${pct(hp, max) <= 30 ? ' low' : ''}" title="${hp} / ${max}"><i style="width:${pct(hp, max)}%"></i></span>`;
+      if (r) inner = hpb(r.hp, r.max_hp) + `<div class="token ${esc(r.role || '')} ${r.img ? 'pic' : ''} ${r.name === opts.me ? 'me' : ''} ${done.has(r.name) ? 'done' : ''}" title="${esc(r.display)}${r.role ? ' · ' + esc(r.role) : ''}"${r.img ? ` style="background-image:url('${esc(r.img)}')"` : ''}>${r.img ? '' : esc(short(r.display))}</div>`;
+      else if (pos === c.pos) inner = hpb(c.hp, c.max_hp, true) + `${c.img ? `<span class="bosspic" style="background-image:url('${esc(c.img)}')"></span>` : esc(short(c.name))}<span class="arrow">${ARROW[c.facing] || ''}</span>`;
       h += `<div class="${cls}" data-pos="${pos}" title="${pos}">${inner}</div>`;
     });
   });
   return h + '</div>';
 }
-function bindGrid(el, onPick) { el?.querySelectorAll('.cell.pick').forEach(n => n.onclick = () => onPick(n.dataset.pos)); }
+function bindGrid(el, onPick) { el?.querySelectorAll('.cell.pick').forEach(n => n.onclick = ev => onPick(n.dataset.pos, ev)); }
 
 function bossHTML(b) {
   const c = b.creature || {};
@@ -269,4 +270,20 @@ function showNextOverlay() {
   requestAnimationFrame(() => el.classList.add('show'));
   const ms = e.kind === 'omen' || e.kind === 'end' ? 3200 : 2000;
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => { el.remove(); ovl.busy = false; showNextOverlay(); }, 300); }, ms);
+}
+
+/* 칸을 누른 자리 옆에 뜨는 작은 확인창. yes 를 누르면 onYes() */
+function confirmPop(ev, text, onYes) {
+  document.querySelector('.pop')?.remove();
+  const d = document.createElement('div'); d.className = 'pop';
+  d.innerHTML = `<div>${esc(text)}</div><div class="btns"><button class="primary sm" data-y>Yes</button><button class="sm" data-n>No</button></div>`;
+  document.body.appendChild(d);
+  const w = d.offsetWidth, h = d.offsetHeight;
+  d.style.left = Math.min(ev.clientX + 12, innerWidth - w - 8) + 'px';
+  d.style.top = Math.min(ev.clientY + 12, innerHeight - h - 8) + 'px';
+  const close = () => { d.remove(); removeEventListener('mousedown', out, true); };
+  const out = e => { if (!d.contains(e.target)) close(); };
+  setTimeout(() => addEventListener('mousedown', out, true));
+  d.querySelector('[data-y]').onclick = () => { close(); onYes(); };
+  d.querySelector('[data-n]').onclick = close;
 }

@@ -417,7 +417,11 @@ class RaidEngine
     runners = table_rows('runner', '스탯').to_h { |r| [r[0].to_s.strip, r] }
     creatures = table_rows('creature', '스탯').to_h { |r| [r[1].to_s.strip, r] }
     data['battles'].each do |b|
+      sess = @sessions[b['id']]
+      chosen = sess ? sess.passive_ctx[:positions].to_h : {}
       b['runners'].each do |r|
+        # 준비 라운드: 시작 칸을 고르기 전에는 격자에 안 보이게
+        r['pos'] = nil if sess && sess.phase == :prep && chosen[r['name']].to_s == ''
         row = runners[r['name']] || []
         r['role'] = row[13].to_s
         r['img'] = row[14].to_s

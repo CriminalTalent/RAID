@@ -303,3 +303,14 @@ input, select, textarea { border-radius: 2px; }
 .pwbox { display: flex; gap: 4px; flex: 1; min-width: 0; }
 .pwbox input { flex: 1; min-width: 0; }
 .pwbox .pweye { flex: none; white-space: nowrap; }
+
+/* 격자 위 체력바 */
+.cell .hpb { position: absolute; top: 3px; left: 12%; right: 12%; height: 4px; border-radius: 2px; background: rgba(0,0,0,.45); overflow: hidden; z-index: 2; }
+.cell .hpb i { display: block; height: 100%; background: var(--ok, #3c6); transition: width .3s; }
+.cell .hpb.low i { background: var(--danger); }
+.cell .hpb.boss { right: 22%; }
+.cell .hpb.boss i { background: var(--boss, #e44); filter: brightness(1.4); }
+.cell .token, .cell .bosspic { margin-top: 6px; }
+/* 칸 확인창 */
+.pop { position: fixed; z-index: 50; background: var(--panel); color: var(--text); border: 1px solid var(--accent); border-radius: 4px; padding: 8px 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.pop .btns { margin-top: 6px; display: flex; gap: 6px; }
