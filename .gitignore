@@ -8,3 +8,7 @@ credentials.json.*
 *.backup
 *.broken
 battle_phase.json
+app/data/raid.json
+app/data/raid.json.tmp
+cloudflared.exe
+app/data/img/
