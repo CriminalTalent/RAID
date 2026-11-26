@@ -13,6 +13,7 @@ require 'securerandom'
 require 'monitor'
 
 APP_DIR    = __dir__
+RAID_DATA_DIR = File.expand_path(ENV['RAID_DATA_DIR'].to_s.strip.empty? ? File.join(__dir__, 'data') : ENV['RAID_DATA_DIR'])
 BATTLE_DIR = File.expand_path('../battle', __dir__)
 $LOAD_PATH.unshift(File.join(APP_DIR, 'stubs'))
 

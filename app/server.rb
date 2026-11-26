@@ -11,7 +11,7 @@ require_relative 'engine'
 
 class RaidServer
   PUBLIC = File.join(__dir__, 'public')
-  IMG_DIR = File.join(__dir__, 'data', 'img')
+  IMG_DIR = File.join(RAID_DATA_DIR, 'img')
   IMG_TYPES = { 'jpg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp', 'gif' => 'image/gif' }.freeze
   PAGES = {
     '/' => 'index.html',
@@ -57,7 +57,9 @@ class RaidServer
     params = URI.decode_www_form(query.to_s).to_h rescue {}
     path = path.chomp('/') if path.length > 1
     # share.bat(클라우드플레어) 로 들어오면 실제 접속자 주소는 이 헤더에 있다
-    Thread.current[:ip] = headers['cf-connecting-ip'].to_s.empty? ? (client.peeraddr[3] rescue '?') : headers['cf-connecting-ip']
+    fwd = headers['cf-connecting-ip'].to_s
+    fwd = headers['x-forwarded-for'].to_s.split(',').last.to_s.strip if fwd.empty?
+    Thread.current[:ip] = fwd.empty? ? (client.peeraddr[3] rescue '?') : fwd
     Thread.current[:set_cookie] = nil
 
     status, type, out = route(method, path, params, headers, body)

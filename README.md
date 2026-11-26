@@ -39,6 +39,21 @@
 5. 이제 참여자 링크를 복사해 보내면 됩니다. 관전 주소는 `그 주소/watch` 입니다.
    (공유 주소는 share.bat 을 켤 때마다 바뀝니다.)
 
+## 4-1. 서버에 올려서 항상 켜 두기 (선택)
+Ruby 표준 기능만 써서 따로 설치할 것이 없고, 저장소에 `Dockerfile` 과 `render.yaml` 이 들어 있습니다.
+- **Render(render.com)**: New → Blueprint → 이 저장소 선택 → `RAID_ADMIN_PASSWORD` 칸에 관리자 비밀번호 입력 → 만들기.
+  `render.yaml` 대로 Docker로 빌드되고 1GB 디스크(`/data`)에 데이터가 저장됩니다. 디스크는 유료(Starter) 플랜에서만 되고, 무료 플랜은 재시작 때마다 데이터가 처음 상태로 돌아갑니다.
+- **Docker가 있는 서버**: `docker build -t raid .` → `docker run -d -p 80:4567 -e RAID_ADMIN_PASSWORD=비밀번호 -v raid-data:/data raid`
+- **Ruby가 있는 리눅스 서버**: `PORT=4567 RAID_DATA_DIR=/srv/raid RAID_ADMIN_PASSWORD=비밀번호 ruby app/run.rb`
+
+| 환경 변수 | 뜻 |
+|---|---|
+| `PORT` | 열 포트. 주면 외부 접속(0.0.0.0)으로 열림 |
+| `RAID_DATA_DIR` | 데이터(raid.json, 이미지) 폴더. 서버의 영구 디스크 경로로 |
+| `RAID_ADMIN_PASSWORD` | 관리자 비밀번호. 주면 켤 때마다 이 값으로 맞춤 (관리자 화면에서 바꿔도 재시작하면 이 값으로 돌아감) |
+
+서버 주소가 생기면 share.bat 은 필요 없고, 관리자 화면의 참여자·관전자 링크가 그 주소로 바로 만들어집니다.
+
 ## 5. 전투 진행 순서
 1. 관리자 → 러너 / 크리쳐 (보스몹) / 보스 스킬 / 러너 스킬 메뉴에서 추가·수정하고 저장 (연습용 예시가 들어 있음)
    - 이미지: 러너 두상과 보스 이미지는 "사진 올리기"로 넣어요(정사각형으로 잘려 `app/data/img` 에 저장). 다른 컴퓨터로 옮길 때는 `app/data` 폴더째 복사하세요.
