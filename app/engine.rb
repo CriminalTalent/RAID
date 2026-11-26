@@ -468,6 +468,14 @@ class RaidEngine
     SkillCatalog.visible(@store.book('app')['스킬'])
   end
 
+  # 이 러너가 쓸 수 있는 스킬: 모두에게 보이는 기본 스킬 + 러너 전용 스킬
+  def skills_for(name)
+    rows = @store.book('app')['스킬']
+    base = SkillCatalog.visible(rows)
+    extra = SkillCatalog.extra(rows, runner_row(name).to_a[11]).reject { |x| base.any? { |b| b[:name] == x[:name] } }
+    base + extra
+  end
+
   # ── 데이터(스탯 표) ──────────────────────────────────────────
   TABLES = {
     'runners'     => ['runner', '스탯'],
@@ -698,10 +706,10 @@ class RaidEngine
   end
 
   # ── 화면 가운데 띄우는 발동 알림 (오버레이) ──────────────────
-  def add_event!(s, kind, who, name, text = '')
+  def add_event!(s, kind, who, name, text = '', extra = {})
     @event_seq += 1
     list = @events[s.id]
-    list << { 'seq' => @event_seq, 'kind' => kind, 'who' => who.to_s, 'name' => name.to_s, 'text' => text.to_s, 'at' => Time.now.to_i }
+    list << { 'seq' => @event_seq, 'bid' => s.id, 'kind' => kind, 'who' => who.to_s, 'name' => name.to_s, 'text' => text.to_s, 'at' => Time.now.to_i }.merge(extra)
     list.shift while list.size > 40
   end
 
@@ -719,12 +727,21 @@ class RaidEngine
         target = a[:target].to_s.split(',').map { |t| s.runner_names.include?(t.strip) ? display_of(t.strip) : t.strip }.join(', ')
         add_event!(s, 'skill', display_of(name), type, target)
       end
-      add_event!(s, 'boss', s.creature[:name], before[:skill]) unless before[:skill].empty?
+      add_event!(s, 'boss', s.creature[:name], before[:skill], before[:single] ? target_label(s, before[:target]) : '') unless before[:skill].empty?
     end
     if s.phase == :battle && (before[:phase] != :battle || before[:round] != s.round)
       omen = s.creature[:omen].to_s.strip
       add_event!(s, 'omen', s.creature[:name], s.creature[:current_skill].to_s, omen) unless omen.empty?
+      c = s.creature
+      single = c[:current_skill].to_s != '전체공격' && BattleBossPatterns.range_shape(c) != '전체' && BattleBossPatterns.pattern_cells(c).empty?
+      who = single ? target_label(s, c[:skill_target]) : ''
+      add_event!(s, 'target', s.creature[:name], s.creature[:current_skill].to_s, who) unless who.empty?
     end
+  end
+
+  # 보스가 노리는 러너 ID들 → 표시 이름
+  def target_label(s, ids)
+    ids.to_s.split(',').map(&:strip).reject(&:empty?).map { |t| s.runner_names.include?(t) ? display_of(t) : t }.join(', ')
   end
 
   # 승리/패배 안내 (기존 봇은 조사봇 시트에 보상을 주며 안내했지만, 웹앱에서는 기록만 남긴다)
@@ -740,7 +757,9 @@ class RaidEngine
            end
     text += settle_credits!(s, text)
     post_session_thread(s, text, @last_post_time)
-    add_event!(s, 'end', s.creature[:name], text.sub(/\A\[(.+?)\].*/m, '\\1'), text)
+    alive = s.runner_names.reject { |n| s.dead_runners.include?(n) }.map { |n| display_of(n) }
+    winners = text.start_with?('[승리]') ? alive : text.start_with?('[패배]') ? [s.creature[:name].to_s] : []
+    add_event!(s, 'end', s.creature[:name], text.sub(/\A\[(.+?)\].*/m, '\\1'), text, 'winners' => winners, 'all' => s.runner_names.map { |n| display_of(n) })
   end
 
   # ── 참여자 ──────────────────────────────────────────────────
@@ -811,7 +830,7 @@ class RaidEngine
         c = item_count(name, r[0])
         { 'name' => r[0], 'count' => c, 'value' => r[2].to_i, 'desc' => r[8].to_s, 'target' => 'runner', 'range' => '제한 없음', 'max_targets' => 1, 'item' => true } if c.positive?
       end,
-      'skills' => skills.map do |item|
+      'skills' => skills_for(name).map do |item|
         sk = item[:name]
         d = BattleSkills.get(sk) || {}
         kind = item[:kind]
@@ -851,7 +870,8 @@ class RaidEngine
           next unless s.active
           next if lobby?(s.id)
           was_active = true
-          before = { phase: s.phase, round: s.round, actions: s.actions.dup, skill: s.creature[:current_skill].to_s }
+          before = { phase: s.phase, round: s.round, actions: s.actions.dup, skill: s.creature[:current_skill].to_s, target: s.creature[:skill_target].to_s,
+                     single: s.creature[:current_skill].to_s != '전체공격' && BattleBossPatterns.range_shape(s.creature) != '전체' && BattleBossPatterns.pattern_cells(s.creature).empty? }
           if s.phase == :prep && !s.announced
             @last_post_time = announce_prep_round(s, @runner_sheet, @runner_sheet, @last_post_time)
           end

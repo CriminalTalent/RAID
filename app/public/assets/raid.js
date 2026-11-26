@@ -2,7 +2,7 @@
 const COLS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 const ROWS = [1, 2, 3, 4, 5, 6, 7, 8];
 const ARROW = { '상': '▲', '하': '▼', '좌': '◀', '우': '▶' };
-const PHASE = { lobby: '참여자 준비 중', prep: '시작 위치 입력', boss_command: '보스 행동 대기', announcing: '라운드 준비', battle: '행동 입력', settling: '정산 중' };
+const PHASE = { lobby: '참여자 준비 중', prep: '시작 위치 입력', boss_command: '보스 행동 대기 (진행자가 고르는 중)', announcing: '라운드 준비', battle: '행동 입력', settling: '정산 중' };
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pct = (hp, max) => Math.max(0, Math.min(100, Math.round(hp / Math.max(max, 1) * 100)));
@@ -245,6 +245,7 @@ function keepInputs(draw) {
 const ovl = { seen: {}, queue: [], busy: false };
 function overlayEvents(battles) {
   (battles || []).forEach(b => {
+    ovl.battles = ovl.battles || {}; ovl.battles[b.id] = b;
     const evs = b.events || [], max = evs.reduce((m, e) => Math.max(m, e.seq), 0);
     if (!(b.id in ovl.seen)) { ovl.seen[b.id] = max; return; }
     evs.filter(e => e.seq > ovl.seen[b.id]).sort((x, y) => x.seq - y.seq).forEach(e => ovl.queue.push(e));
@@ -256,9 +257,11 @@ function overlayEvents(battles) {
 function showNextOverlay() {
   if (ovl.busy || !ovl.queue.length) return;
   const e = ovl.queue.shift(); ovl.busy = true;
+  if (e.kind === 'end') return showResult(e);
   const T = {
     skill: [esc(e.who), `스킬 「${esc(e.name)}」 발동`, e.text ? '대상 ' + esc(e.text) : ''],
-    boss: [esc(e.who), `보스 스킬 「${esc(e.name)}」 발동`, ''],
+    boss: [esc(e.who), `보스 스킬 「${esc(e.name)}」 발동`, e.text ? '대상 ' + esc(e.text) : ''],
+    target: ['◎ 표적', `${esc(e.text)}`, `${esc(e.who)}이(가) 노립니다${e.name ? ' · 「' + esc(e.name) + '」' : ''}`],
     omen: ['⚠ 전조', esc(e.text), e.name ? `${esc(e.who)} · 「${esc(e.name)}」` : esc(e.who)],
     end: [esc(e.who), esc(e.name), '']
   }[e.kind] || [esc(e.who), esc(e.name), ''];
@@ -268,7 +271,7 @@ function showNextOverlay() {
   el.onclick = () => el.remove();
   document.body.appendChild(el);
   requestAnimationFrame(() => el.classList.add('show'));
-  const ms = e.kind === 'omen' || e.kind === 'end' ? 3200 : 2000;
+  const ms = e.kind === 'omen' || e.kind === 'target' ? 3200 : 2000;
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => { el.remove(); ovl.busy = false; showNextOverlay(); }, 300); }, ms);
 }
 
@@ -286,4 +289,27 @@ function confirmPop(ev, text, onYes) {
   setTimeout(() => addEventListener('mousedown', out, true));
   d.querySelector('[data-y]').onclick = () => { close(); onYes(); };
   d.querySelector('[data-n]').onclick = close;
+}
+
+/* 전투 결과 창: 승리자 + [확인] + [전투 기록 보기] */
+function showResult(e) {
+  const win = e.name === '승리', lose = e.name === '패배';
+  const w = (e.winners || []);
+  const d = document.createElement('div'); d.className = 'result-bg';
+  d.innerHTML = `<div class="result ${win ? 'win' : lose ? 'lose' : ''}">
+    <div class="r-k">BATTLE RESULT</div>
+    <div class="r-t">${win ? '승리' : lose ? '패배' : '전투 종료'}</div>
+    <div class="r-sub">${esc(e.who)}${win ? ' 처치!' : lose ? '에게 전원 전투불능' : ''}</div>
+    ${w.length ? `<div class="r-sec">승리자</div><div class="r-names">${w.map(n => `<span>${esc(n)}</span>`).join('')}</div>` : ''}
+    <pre class="r-text">${esc(String(e.text || '').replace(/^\[[^\]]+\][^\n]*\n?/, '').trim())}</pre>
+    <div class="btns" style="justify-content:center;margin-top:12px"><button class="primary" data-ok>확인</button><button data-log>전투 기록 보기</button></div>
+    <div class="r-log" hidden></div></div>`;
+  document.body.appendChild(d);
+  const done = () => { d.remove(); ovl.busy = false; showNextOverlay(); };
+  d.querySelector('[data-ok]').onclick = done;
+  d.querySelector('[data-log]').onclick = () => {
+    const box = d.querySelector('.r-log'), b = (ovl.battles || {})[e.bid] || {};
+    box.hidden = !box.hidden;
+    box.innerHTML = (b.log || []).map(l => `<article><time>${l.round}R</time>${esc(l.text)}</article>`).join('') || '<div class="empty">기록이 없습니다.</div>';
+  };
 }

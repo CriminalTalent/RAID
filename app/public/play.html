@@ -184,7 +184,7 @@ function draw() {
     <div>
       <div class="card"><div class="panel-h boss">보스</div>${bossCardHTML(battle)}</div>
       <div class="card"><div class="card-h"><h2>응원</h2></div>${cheerFeedHTML(battle, 4)}</div>
-      <div class="card"><div class="card-h"><h2>전투 기록</h2></div><div class="log" style="max-height:380px">${logHTML(battle, 8)}</div></div>
+      <div class="card"><div class="card-h"><h2>전투 기록</h2></div><div class="log" style="max-height:380px">${logHTML(battle, battle.active ? 8 : 200)}</div></div>
     </div>
   </div>`;
 

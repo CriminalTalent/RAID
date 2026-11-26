@@ -8,7 +8,7 @@
 require 'json'
 
 module WebState
-  LOG_LIMIT = 30
+  LOG_LIMIT = 200
   KEEP_FINISHED_SECONDS = 3600
 
   @mutex = Mutex.new

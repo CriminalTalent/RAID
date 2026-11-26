@@ -106,6 +106,15 @@ module SkillCatalog
     end.select { |s| FIXED.key?(s[:kind]) || BattleSkills.get(s[:name]) }
   end
 
+  # 러너 전용 스킬 (러너 표의 '스킬2' 칸에 쉼표로 적힌 이름들)
+  def extra(rows, names)
+    want = names.to_s.split(',').map(&:strip).reject(&:empty?)
+    Array(rows)[1..].to_a.select { |r| want.include?(r[0].to_s.strip) }.map do |r|
+      kind = r[2].to_s.strip
+      { name: FIXED[kind] || r[0].to_s.strip, kind: kind }
+    end.select { |s| FIXED.key?(s[:kind]) || BattleSkills.get(s[:name]) }
+  end
+
   def validate!(rows)
     names = []
     Array(rows)[1..].to_a.each do |r|
